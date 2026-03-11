@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: globaltask-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: globaltask-api
+  template:
+    metadata:
+      labels:
+        app: globaltask-api
+    spec:
+      containers:
+      - name: api
+        image: globaltask-api:latest
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: globaltask-config
+        - secretRef:
+            name: globaltask-secrets
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: globaltask-api-service
+spec:
+  selector:
+    app: globaltask-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: ClusterIP

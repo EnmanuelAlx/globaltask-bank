@@ -1,0 +1,34 @@
+# Workflow Configuration
+# This defines the event pipeline for each country
+
+workflows:
+  # Portugal workflow
+  PT:
+    - event: LOAN_APPLICATION_CREATED
+      next: FETCH_BANK_DATA
+    - event: FETCH_BANK_DATA
+      next: VALIDATE_USER_IDENTITY
+    - event: VALIDATE_USER_IDENTITY
+      next: EVALUATE_APPLICATION_RISK
+    - event: EVALUATE_APPLICATION_RISK
+      next: null  # End of workflow
+
+  # Colombia workflow
+  CO:
+    - event: LOAN_APPLICATION_CREATED
+      next: FETCH_BANK_DATA
+    - event: FETCH_BANK_DATA
+      next: EVALUATE_APPLICATION_RISK
+    - event: EVALUATE_APPLICATION_RISK
+      next: null
+
+# Risk evaluation rules by country
+risk_rules:
+  PT:
+    max_monthly_payment_percentage: 0.35  # 35%
+    max_amount_multiplier: 8.0            # 8x monthly income
+    min_credit_score: 600
+  CO:
+    max_monthly_payment_percentage: 0.50  # 50% (Flexible for CO)
+    max_amount_multiplier: 2.0           # 2x monthly income (User requirement: max 200%)
+    min_income_debt_multiplier: 3.0      # User requirement: Income < 3x Debt = Reject

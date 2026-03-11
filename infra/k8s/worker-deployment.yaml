@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: globaltask-worker
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: globaltask-worker
+  template:
+    metadata:
+      labels:
+        app: globaltask-worker
+    spec:
+      containers:
+      - name: worker
+        image: globaltask-worker:latest
+        command: ["./worker"]
+        envFrom:
+        - configMapRef:
+            name: globaltask-config
+        - secretRef:
+            name: globaltask-secrets

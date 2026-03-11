@@ -1,0 +1,15 @@
+frontend/node_modules
+frontend/dist
+.env
+
+
+backend/tmp*
+
+# Supabase
+.branches
+.temp
+
+# dotenvx
+.env.keys
+.env.local
+.env.*.local

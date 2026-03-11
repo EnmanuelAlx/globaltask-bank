@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: globaltask-config
+data:
+  API_PORT: "8080"
+  LOG_LEVEL: "info"
+  WORKER_CONCURRENCY: "10"
+  SUPABASE_URL: "http://globaltask-storage:8000"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: globaltask-secrets
+type: Opaque
+data:
+  # Echo "password" | base64
+  POSTGRES_PASSWORD: cGFzc3dvcmQ=
+  # Echo "your-secret" | base64
+  DATABASE_URL: cG9zdGdyZXNxbDovL3Bvc3RncmVzOnBhc3N3b3JkQGdsb2JhbHRhc2stZGI6NTQzMi9wb3N0Z3Jlcw==

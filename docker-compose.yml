@@ -1,0 +1,112 @@
+
+services:
+  # ==========================================
+  # FRONTEND - Vue.js
+  # ==========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: globaltask-frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - globaltask-network
+      - supabase-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    env_file:
+      - .env
+
+  # ==========================================
+  # BACKEND - Go API
+  # ==========================================
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: globaltask-api
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    networks:
+      - globaltask-network
+      - supabase-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ==========================================
+  # WORKER - Go Background Processor
+  # ==========================================
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: globaltask-worker
+    command: ["/go/bin/air", "-c", ".air.worker.toml"]
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    networks:
+      - globaltask-network
+      - supabase-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ==========================================
+  # MOCK BANK - External Service Mock
+  # ==========================================
+  mock-bank:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: globaltask-mock-bank
+    command: ["./mockbank"]
+    env_file:
+      - .env
+    ports:
+      - "8081:8081"
+    networks:
+      - globaltask-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ==========================================
+  # NGINX - Main Reverse Proxy
+  # ==========================================
+  nginx:
+    image: nginx:alpine
+    container_name: globaltask-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+      - frontend
+    networks:
+      - globaltask-network
+      - supabase-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+networks:
+  globaltask-network:
+    driver: bridge
+  supabase-network:
+    external: true
+    name: supabase_network_globaltask-bank
+
+volumes:
+  supabase-data:
