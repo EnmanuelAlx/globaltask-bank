@@ -10,11 +10,9 @@ init: ## Step 1: Initialize Supabase, migrations and create user
 up: ## Step 2: Build and start all services
 	docker-compose up -d --build
 
-down: ## Stop all services
+down: ## Restart all services
+	supabase stop --no-backup --workdir infra/
 	docker-compose down -v
-
-restart: ## Restart all services
-	docker-compose restart
 
 logs: ## Show logs
 	docker-compose logs -f

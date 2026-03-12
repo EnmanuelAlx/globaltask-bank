@@ -9,6 +9,7 @@ import (
 
 	"github.com/globaltask/bank/internal/domain/entity"
 	"github.com/globaltask/bank/internal/infrastructure/repository"
+	"github.com/globaltask/bank/internal/infrastructure/utils"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
@@ -94,11 +95,11 @@ func (e *WorkflowEngine) GetNextStep(countryCode string, currentEvent string) *s
 // HandleLoanApplicationCreated processes the initial application event
 func (e *WorkflowEngine) HandleLoanApplicationCreated(ctx context.Context, uow repository.UnitOfWork, event *entity.EventOutbox) error {
 	payload := event.Payload
-	log.Printf("Processing event %s with payload: %+v", event.ID, payload)
+	log.Printf("Processing event %s with application_id: %v", event.ID, payload["application_id"])
 
 	appIDStr, ok := payload["application_id"].(string)
 	if !ok {
-		log.Printf("Invalid payload in event %s: %+v", event.ID, payload)
+		log.Printf("Invalid payload in event %s: %+v", event.ID, utils.MaskMap(payload))
 		return ErrInvalidPayload
 	}
 
@@ -165,8 +166,6 @@ func (e *WorkflowEngine) HandleLoanApplicationCreated(ctx context.Context, uow r
 
 // HandleFetchBankData processes bank data fetching
 func (e *WorkflowEngine) HandleFetchBankData(ctx context.Context, uow repository.UnitOfWork, event *entity.EventOutbox) error {
-	log.Printf("Processing FetchBankData for event %s", event.ID)
-
 	payload := event.Payload
 	appIDStr, _ := payload["application_id"].(string)
 	appID, _ := uuid.Parse(appIDStr)
@@ -255,11 +254,9 @@ func (e *WorkflowEngine) HandleFetchBankData(ctx context.Context, uow repository
 		}
 
 		if resp["status"] == "accepted" || resp["status"] == "processing" {
-			log.Printf("Provider %s returned '%s' status (asynchronous). Waiting for callback for application %s", provider.ProviderName, resp["status"], app.ID)
+			log.Printf("Provider %s returned '%s' status (asynchronous) for application %s", provider.ProviderName, resp["status"], app.ID)
 			return nil
 		}
-
-		log.Printf("Successfully called provider %s (synchronous)", provider.ProviderName)
 
 		// Update app.BankInformation with response data
 		if app.BankInformation == nil {
@@ -379,11 +376,9 @@ func (e *WorkflowEngine) HandleValidateUserIdentity(ctx context.Context, uow rep
 			}
 
 			if resp["status"] == "accepted" {
-				log.Printf("Provider %s returned 'accepted' status for identity validation (asynchronous). Waiting for callback for application %s", provider.ProviderName, app.ID)
+				log.Printf("Provider %s returned 'accepted' status for identity validation (asynchronous) for application %s", provider.ProviderName, app.ID)
 				return nil
 			}
-
-			log.Printf("Successfully called provider %s for identity validation (synchronous)", provider.ProviderName)
 
 			// Update app.BankInformation with response data for validation
 			if app.BankInformation == nil {
@@ -411,12 +406,12 @@ func (e *WorkflowEngine) HandleValidateUserIdentity(ctx context.Context, uow rep
 
 	isValid := true
 	if bankID != profile.IdentityDocument {
-		log.Printf("Identity Verification Failed: ID mismatch (provided: %s, bank: %s)", profile.IdentityDocument, bankID)
+		log.Printf("Identity Verification Failed: ID mismatch (provided: %s, bank: %s)", utils.MaskID(profile.IdentityDocument), utils.MaskID(bankID))
 		isValid = false
 	}
 
 	if profile.FullName != "" && bankName != "" && bankName != profile.FullName {
-		log.Printf("Identity Verification Failed: Name mismatch (provided: %s, bank: %s)", profile.FullName, bankName)
+		log.Printf("Identity Verification Failed: Name mismatch (provided: %s, bank: %s)", utils.MaskName(profile.FullName), utils.MaskName(bankName))
 		isValid = false
 	}
 
