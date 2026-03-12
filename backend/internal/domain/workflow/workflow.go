@@ -9,6 +9,7 @@ import (
 
 	"github.com/globaltask/bank/internal/domain/entity"
 	"github.com/globaltask/bank/internal/infrastructure/repository"
+	"github.com/globaltask/bank/internal/infrastructure/security"
 	"github.com/globaltask/bank/internal/infrastructure/utils"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -40,6 +41,7 @@ type WorkflowEngine struct {
 	workflowProviderRepo repository.WorkflowProviderRepository
 	eventOutboxRepo      repository.EventOutboxRepository
 	identityService      entity.IdentityService
+	encryptor            security.Encryptor
 	providerFactory      ProviderFactory
 	config               Config
 }
@@ -52,6 +54,7 @@ func NewWorkflowEngine(
 	workflowProviderRepo repository.WorkflowProviderRepository,
 	eventOutboxRepo repository.EventOutboxRepository,
 	identityService entity.IdentityService,
+	encryptor security.Encryptor,
 	providerFactory ProviderFactory,
 ) *WorkflowEngine {
 	engine := &WorkflowEngine{
@@ -62,6 +65,7 @@ func NewWorkflowEngine(
 		workflowProviderRepo: workflowProviderRepo,
 		eventOutboxRepo:      eventOutboxRepo,
 		identityService:      identityService,
+		encryptor:            encryptor,
 		providerFactory:      providerFactory,
 	}
 	engine.loadConfig()
@@ -202,7 +206,6 @@ func (e *WorkflowEngine) HandleFetchBankData(ctx context.Context, uow repository
 		return fmt.Errorf("no bank providers mapped for country %s and step %s", country.ISOCode, entity.EventFetchBankData)
 	}
 
-	// 4. Construct payload (same for all)
 	bankPayload := map[string]interface{}{
 		"application_id":    app.ID.String(),
 		"borrower_name":     profile.FullName,
@@ -410,7 +413,7 @@ func (e *WorkflowEngine) HandleValidateUserIdentity(ctx context.Context, uow rep
 		isValid = false
 	}
 
-	if profile.FullName != "" && bankName != "" && bankName != profile.FullName {
+	if bankName != "" && bankName != profile.FullName {
 		log.Printf("Identity Verification Failed: Name mismatch (provided: %s, bank: %s)", utils.MaskName(profile.FullName), utils.MaskName(bankName))
 		isValid = false
 	}

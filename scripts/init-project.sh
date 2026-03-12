@@ -57,7 +57,8 @@ USER_RESPONSE=$(curl -s -X POST "$API_URL/auth/v1/admin/users" \
     \"user_metadata\": {
       \"full_name\": \"Admin\",
       \"role\": \"ADMIN\",
-      \"identity_document\": \"1\",
+      \"identity_document\": \"MTIzNDU2Nzg5\",
+      \"identity_document_bidx\": \"MTIzNDU2Nzg5\",
       \"country_id\": \"1\"
     }
   }")

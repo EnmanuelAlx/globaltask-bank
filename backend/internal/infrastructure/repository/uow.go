@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 
+	"github.com/globaltask/bank/internal/infrastructure/security"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,12 +24,13 @@ type UnitOfWork interface {
 }
 
 type pgUnitOfWork struct {
-	pool *pgxpool.Pool
-	tx   pgx.Tx
+	pool      *pgxpool.Pool
+	tx        pgx.Tx
+	encryptor security.Encryptor
 }
 
-func NewPgUnitOfWork(pool *pgxpool.Pool) UnitOfWork {
-	return &pgUnitOfWork{pool: pool}
+func NewPgUnitOfWork(pool *pgxpool.Pool, encryptor security.Encryptor) UnitOfWork {
+	return &pgUnitOfWork{pool: pool, encryptor: encryptor}
 }
 
 func (u *pgUnitOfWork) Do(ctx context.Context, fn func(UnitOfWork) error) error {
@@ -51,7 +53,7 @@ func (u *pgUnitOfWork) Do(ctx context.Context, fn func(UnitOfWork) error) error 
 		}
 	}()
 
-	err = fn(&pgUnitOfWork{pool: u.pool, tx: tx})
+	err = fn(&pgUnitOfWork{pool: u.pool, tx: tx, encryptor: u.encryptor})
 	if err != nil {
 		return err
 	}
@@ -61,9 +63,9 @@ func (u *pgUnitOfWork) Do(ctx context.Context, fn func(UnitOfWork) error) error 
 
 func (u *pgUnitOfWork) LoanApplications() LoanApplicationRepository {
 	if u.tx != nil {
-		return NewLoanApplicationRepository(u.tx)
+		return NewLoanApplicationRepository(u.tx, u.encryptor)
 	}
-	return NewLoanApplicationRepository(u.pool)
+	return NewLoanApplicationRepository(u.pool, u.encryptor)
 }
 
 func (u *pgUnitOfWork) EventOutbox() EventOutboxRepository {
@@ -75,7 +77,7 @@ func (u *pgUnitOfWork) EventOutbox() EventOutboxRepository {
 
 func (u *pgUnitOfWork) Profiles() ProfileRepository {
 	if u.tx != nil {
-		return NewProfileRepository(u.tx)
+		return NewProfileRepository(u.tx, u.encryptor)
 	}
-	return NewProfileRepository(u.pool)
+	return NewProfileRepository(u.pool, u.encryptor)
 }

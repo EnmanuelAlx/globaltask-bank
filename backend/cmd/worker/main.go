@@ -12,6 +12,7 @@ import (
 	"github.com/globaltask/bank/internal/infrastructure/auth"
 	"github.com/globaltask/bank/internal/infrastructure/database"
 	"github.com/globaltask/bank/internal/infrastructure/repository"
+	"github.com/globaltask/bank/internal/infrastructure/security"
 	"github.com/globaltask/bank/internal/infrastructure/worker"
 )
 
@@ -43,17 +44,26 @@ func main() {
 	log.Println("✅ Database connected")
 
 	// ==========================================
+	// 2.5 Security / Crypto
+	// ==========================================
+	encryptor, err := security.NewAESEncryptor()
+	if err != nil {
+		log.Fatalf("Failed to initialize encryptor: %v", err)
+	}
+
+	// ==========================================
 	// 3. Repositories
 	// ==========================================
 	dbPool := db.Pool()
-	loanAppRepo := repository.NewLoanApplicationRepository(dbPool)
+	loanAppRepo := repository.NewLoanApplicationRepository(dbPool, encryptor)
 	eventOutboxRepo := repository.NewEventOutboxRepository(dbPool)
 	countryRepo := repository.NewCountryRepository(dbPool)
+	countryRepo = repository.NewCachedCountryRepository(countryRepo, 1*time.Hour)
 	bankProviderRepo := repository.NewBankProviderRepository(dbPool)
 	workflowProviderRepo := repository.NewWorkflowProviderRepository(dbPool)
-	uow := repository.NewPgUnitOfWork(dbPool)
+	uow := repository.NewPgUnitOfWork(dbPool, encryptor)
 
-	identityService := auth.NewSupabaseIdentityService()
+	identityService := auth.NewSupabaseIdentityService(encryptor)
 
 	providerFactory := workflow.NewProviderFactory()
 	workflow.RegisterDefaultClients(providerFactory)
@@ -66,6 +76,7 @@ func main() {
 		workflowProviderRepo,
 		eventOutboxRepo,
 		identityService,
+		encryptor,
 		providerFactory,
 	)
 

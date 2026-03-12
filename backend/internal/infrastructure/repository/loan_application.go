@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/globaltask/bank/internal/domain/entity"
+	"github.com/globaltask/bank/internal/infrastructure/security"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -34,11 +35,12 @@ type ListFilter struct {
 }
 
 type loanApplicationRepo struct {
-	db DBTX
+	db        DBTX
+	encryptor security.Encryptor
 }
 
-func NewLoanApplicationRepository(db DBTX) LoanApplicationRepository {
-	return &loanApplicationRepo{db: db}
+func NewLoanApplicationRepository(db DBTX, encryptor security.Encryptor) LoanApplicationRepository {
+	return &loanApplicationRepo{db: db, encryptor: encryptor}
 }
 
 func (r *loanApplicationRepo) Create(ctx context.Context, app *entity.LoanApplication) error {
@@ -78,7 +80,20 @@ func (r *loanApplicationRepo) GetByID(ctx context.Context, id uuid.UUID) (*entit
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
-	return &app, err
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt
+	if app.IdentityDocument != "" {
+		decrypted, err := r.encryptor.Decrypt(app.IdentityDocument)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt identity document: %w", err)
+		}
+		app.IdentityDocument = decrypted
+	}
+
+	return &app, nil
 }
 
 func (r *loanApplicationRepo) GetByIDForUpdate(ctx context.Context, id uuid.UUID) (*entity.LoanApplication, error) {
@@ -103,7 +118,20 @@ func (r *loanApplicationRepo) GetByIDForUpdate(ctx context.Context, id uuid.UUID
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
-	return &app, err
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt
+	if app.IdentityDocument != "" {
+		decrypted, err := r.encryptor.Decrypt(app.IdentityDocument)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt identity document: %w", err)
+		}
+		app.IdentityDocument = decrypted
+	}
+
+	return &app, nil
 }
 
 func (r *loanApplicationRepo) List(ctx context.Context, filter ListFilter) ([]*entity.LoanApplication, error) {
@@ -140,8 +168,9 @@ func (r *loanApplicationRepo) List(ctx context.Context, filter ListFilter) ([]*e
 	}
 
 	if filter.IdentityDocument != nil {
-		query += fmt.Sprintf(" AND p.identity_document = $%d", argNum)
-		args = append(args, *filter.IdentityDocument)
+		bidx := r.encryptor.GenerateBlindIndex(*filter.IdentityDocument)
+		query += fmt.Sprintf(" AND p.identity_document_bidx = $%d", argNum)
+		args = append(args, bidx)
 		argNum++
 	}
 
@@ -200,6 +229,16 @@ func (r *loanApplicationRepo) List(ctx context.Context, filter ListFilter) ([]*e
 		if err != nil {
 			return nil, err
 		}
+
+		// Decrypt
+		if app.IdentityDocument != "" {
+			decrypted, err := r.encryptor.Decrypt(app.IdentityDocument)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decrypt identity document for app %s: %w", app.ID, err)
+			}
+			app.IdentityDocument = decrypted
+		}
+
 		apps = append(apps, &app)
 	}
 	return apps, nil

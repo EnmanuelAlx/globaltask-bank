@@ -7,10 +7,32 @@ import (
 
 	"github.com/globaltask/bank/internal/domain/entity"
 	"github.com/globaltask/bank/internal/infrastructure/repository"
+	"github.com/globaltask/bank/internal/infrastructure/security"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
+
+type mockEncryptor struct {
+	mock.Mock
+}
+
+var _ security.Encryptor = (*mockEncryptor)(nil)
+
+func (m *mockEncryptor) Encrypt(plaintext string) (string, error) {
+	args := m.Called(plaintext)
+	return args.String(0), args.Error(1)
+}
+
+func (m *mockEncryptor) Decrypt(ciphertext string) (string, error) {
+	args := m.Called(ciphertext)
+	return args.String(0), args.Error(1)
+}
+
+func (m *mockEncryptor) GenerateBlindIndex(plaintext string) string {
+	args := m.Called(plaintext)
+	return args.String(0)
+}
 
 // Mock repositories
 type mockLoanAppRepo struct {
@@ -289,11 +311,12 @@ func TestWorkflowEngine_HandleEvaluateRisk(t *testing.T) {
 			eventRepo := new(mockEventOutboxRepo)
 			profileRepo := new(mockProfileRepo)
 			identityService := new(mockIdentityService)
+			encryptor := new(mockEncryptor)
 			workflowProviderRepo := new(mockWorkflowProviderRepo)
 			providerFactory := new(mockProviderFactory)
 			uow := &mockUnitOfWork{loanRepo: loanRepo, eventRepo: eventRepo, profileRepo: profileRepo}
 
-			engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, providerFactory)
+			engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, encryptor, providerFactory)
 			engine.config.RiskRules = map[string]RiskRule{
 				"PT": {MaxMonthlyPaymentPct: 0.35, MaxAmountMultiplier: 8.0},
 				"MX": {MaxMonthlyPaymentPct: 0.40, MaxAmountMultiplier: 10.0},
@@ -382,11 +405,12 @@ func TestWorkflowEngine_GetNextStep(t *testing.T) {
 			bankRepo := new(mockBankProviderRepo)
 			eventRepo := new(mockEventOutboxRepo)
 			identityService := new(mockIdentityService)
+			encryptor := new(mockEncryptor)
 			workflowProviderRepo := new(mockWorkflowProviderRepo)
 			providerFactory := new(mockProviderFactory)
 			uow := &mockUnitOfWork{loanRepo: loanRepo, eventRepo: eventRepo}
 
-			engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, providerFactory)
+			engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, encryptor, providerFactory)
 			engine.config.Workflows = map[string][]WorkflowStep{
 				"PT": {
 					{Event: string(entity.EventLoanApplicationCreated), Next: &step2},
@@ -423,11 +447,12 @@ func TestWorkflowEngine_HandleFetchBankData_Fallback(t *testing.T) {
 	eventRepo := new(mockEventOutboxRepo)
 	profileRepo := new(mockProfileRepo)
 	identityService := new(mockIdentityService)
+	encryptor := new(mockEncryptor)
 	workflowProviderRepo := new(mockWorkflowProviderRepo)
 	providerFactory := new(mockProviderFactory)
 	uow := &mockUnitOfWork{loanRepo: loanRepo, eventRepo: eventRepo, profileRepo: profileRepo}
 
-	engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, providerFactory)
+	engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, encryptor, providerFactory)
 	engine.config.Workflows = map[string][]WorkflowStep{
 		"PT": {
 			{Event: "FETCH_BANK_DATA", Next: stringPtr("VALIDATE_USER_IDENTITY")},
@@ -439,8 +464,11 @@ func TestWorkflowEngine_HandleFetchBankData_Fallback(t *testing.T) {
 	ctx := context.Background()
 
 	app := &entity.LoanApplication{ID: appID, UserID: userID}
-	profile := &entity.Profile{ID: userID, CountryID: 1, FullName: "John Doe"}
+	profile := &entity.Profile{ID: userID, CountryID: 1, FullName: "John Doe", IdentityDocument: "12345"}
 	country := &entity.Country{ID: 1, ISOCode: "PT"}
+
+	encryptor.On("Decrypt", "John Doe").Return("John Doe", nil)
+	encryptor.On("Decrypt", "12345").Return("12345", nil)
 
 	mappings := []*entity.WorkflowProvider{
 		{ProviderID: 101, Priority: 10, EndpointPath: "/v1/data"},
@@ -491,19 +519,23 @@ func TestWorkflowEngine_HandleFetchBankData_AllFail(t *testing.T) {
 	eventRepo := new(mockEventOutboxRepo)
 	profileRepo := new(mockProfileRepo)
 	identityService := new(mockIdentityService)
+	encryptor := new(mockEncryptor)
 	workflowProviderRepo := new(mockWorkflowProviderRepo)
 	providerFactory := new(mockProviderFactory)
 	uow := &mockUnitOfWork{loanRepo: loanRepo, eventRepo: eventRepo, profileRepo: profileRepo}
 
-	engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, providerFactory)
+	engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, encryptor, providerFactory)
 
 	appID := uuid.New()
 	userID := uuid.New()
 	ctx := context.Background()
 
 	app := &entity.LoanApplication{ID: appID, UserID: userID}
-	profile := &entity.Profile{ID: userID, CountryID: 1, FullName: "John Doe"}
+	profile := &entity.Profile{ID: userID, CountryID: 1, FullName: "John Doe", IdentityDocument: "12345"}
 	country := &entity.Country{ID: 1, ISOCode: "PT"}
+
+	encryptor.On("Decrypt", "John Doe").Return("John Doe", nil)
+	encryptor.On("Decrypt", "12345").Return("12345", nil)
 
 	mappings := []*entity.WorkflowProvider{
 		{ProviderID: 101, Priority: 10, EndpointPath: "/v1/data"},
@@ -537,11 +569,12 @@ func TestWorkflowEngine_HandleValidateUserIdentity_Fallback(t *testing.T) {
 	eventRepo := new(mockEventOutboxRepo)
 	profileRepo := new(mockProfileRepo)
 	identityService := new(mockIdentityService)
+	encryptor := new(mockEncryptor)
 	workflowProviderRepo := new(mockWorkflowProviderRepo)
 	providerFactory := new(mockProviderFactory)
 	uow := &mockUnitOfWork{loanRepo: loanRepo, eventRepo: eventRepo, profileRepo: profileRepo}
 
-	engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, providerFactory)
+	engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, encryptor, providerFactory)
 	engine.config.Workflows = map[string][]WorkflowStep{
 		"PT": {
 			{Event: "VALIDATE_USER_IDENTITY", Next: stringPtr("EVALUATE_APPLICATION_RISK")},
@@ -560,6 +593,9 @@ func TestWorkflowEngine_HandleValidateUserIdentity_Fallback(t *testing.T) {
 		{ProviderID: 101, Priority: 10, EndpointPath: "/v1/identity"},
 		{ProviderID: 102, Priority: 20, EndpointPath: "/v1/identity"},
 	}
+
+	encryptor.On("Decrypt", "John Doe").Return("John Doe", nil)
+	encryptor.On("Decrypt", "12345").Return("12345", nil)
 
 	p1 := &entity.BankProvider{ID: 101, ProviderName: "P1", BaseURL: "http://p1"}
 	p2 := &entity.BankProvider{ID: 102, ProviderName: "P2", BaseURL: "http://p2"}
@@ -604,19 +640,23 @@ func TestWorkflowEngine_HandleFetchBankData_Accepted(t *testing.T) {
 	eventRepo := new(mockEventOutboxRepo)
 	profileRepo := new(mockProfileRepo)
 	identityService := new(mockIdentityService)
+	encryptor := new(mockEncryptor)
 	workflowProviderRepo := new(mockWorkflowProviderRepo)
 	providerFactory := new(mockProviderFactory)
 	uow := &mockUnitOfWork{loanRepo: loanRepo, eventRepo: eventRepo, profileRepo: profileRepo}
 
-	engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, providerFactory)
+	engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, encryptor, providerFactory)
 
 	appID := uuid.New()
 	userID := uuid.New()
 	ctx := context.Background()
 
 	app := &entity.LoanApplication{ID: appID, UserID: userID}
-	profile := &entity.Profile{ID: userID, CountryID: 1, FullName: "John Doe"}
+	profile := &entity.Profile{ID: userID, CountryID: 1, FullName: "John Doe", IdentityDocument: "12345"}
 	country := &entity.Country{ID: 1, ISOCode: "PT"}
+
+	encryptor.On("Decrypt", "John Doe").Return("John Doe", nil)
+	encryptor.On("Decrypt", "12345").Return("12345", nil)
 
 	mappings := []*entity.WorkflowProvider{
 		{ProviderID: 101, Priority: 10, EndpointPath: "/v1/data"},
@@ -655,19 +695,23 @@ func TestWorkflowEngine_HandleFetchBankData_Processing(t *testing.T) {
 	eventRepo := new(mockEventOutboxRepo)
 	profileRepo := new(mockProfileRepo)
 	identityService := new(mockIdentityService)
+	encryptor := new(mockEncryptor)
 	workflowProviderRepo := new(mockWorkflowProviderRepo)
 	providerFactory := new(mockProviderFactory)
 	uow := &mockUnitOfWork{loanRepo: loanRepo, eventRepo: eventRepo, profileRepo: profileRepo}
 
-	engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, providerFactory)
+	engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, encryptor, providerFactory)
 
 	appID := uuid.New()
 	userID := uuid.New()
 	ctx := context.Background()
 
 	app := &entity.LoanApplication{ID: appID, UserID: userID}
-	profile := &entity.Profile{ID: userID, CountryID: 1, FullName: "John Doe"}
+	profile := &entity.Profile{ID: userID, CountryID: 1, FullName: "John Doe", IdentityDocument: "12345"}
 	country := &entity.Country{ID: 1, ISOCode: "PT"}
+
+	encryptor.On("Decrypt", "John Doe").Return("John Doe", nil)
+	encryptor.On("Decrypt", "12345").Return("12345", nil)
 
 	mappings := []*entity.WorkflowProvider{
 		{ProviderID: 101, Priority: 10, EndpointPath: "/v1/data"},
@@ -706,11 +750,12 @@ func TestWorkflowEngine_HandleValidateUserIdentity_Accepted(t *testing.T) {
 	eventRepo := new(mockEventOutboxRepo)
 	profileRepo := new(mockProfileRepo)
 	identityService := new(mockIdentityService)
+	encryptor := new(mockEncryptor)
 	workflowProviderRepo := new(mockWorkflowProviderRepo)
 	providerFactory := new(mockProviderFactory)
 	uow := &mockUnitOfWork{loanRepo: loanRepo, eventRepo: eventRepo, profileRepo: profileRepo}
 
-	engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, providerFactory)
+	engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, workflowProviderRepo, eventRepo, identityService, encryptor, providerFactory)
 
 	appID := uuid.New()
 	userID := uuid.New()
@@ -719,6 +764,9 @@ func TestWorkflowEngine_HandleValidateUserIdentity_Accepted(t *testing.T) {
 	app := &entity.LoanApplication{ID: appID, UserID: userID, BankInformation: make(entity.JSONB)}
 	profile := &entity.Profile{ID: userID, CountryID: 1, FullName: "John Doe", IdentityDocument: "12345"}
 	country := &entity.Country{ID: 1, ISOCode: "PT"}
+
+	encryptor.On("Decrypt", "John Doe").Return("John Doe", nil)
+	encryptor.On("Decrypt", "12345").Return("12345", nil)
 
 	mappings := []*entity.WorkflowProvider{
 		{ProviderID: 101, Priority: 10, EndpointPath: "/v1/identity"},

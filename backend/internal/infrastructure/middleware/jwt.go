@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -135,6 +136,7 @@ func JWTAuth(profileRepo repository.ProfileRepository) gin.HandlerFunc {
 
 		// Get role from profile table instead of relying only on claims
 		role := "USER"
+		fmt.Println("User id", userID)
 		if profileRepo != nil {
 			profile, err := profileRepo.GetByID(c.Request.Context(), userID)
 			if err == nil && profile != nil {

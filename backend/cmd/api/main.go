@@ -17,6 +17,7 @@ import (
 	"github.com/globaltask/bank/internal/infrastructure/handler"
 	"github.com/globaltask/bank/internal/infrastructure/middleware"
 	"github.com/globaltask/bank/internal/infrastructure/repository"
+	"github.com/globaltask/bank/internal/infrastructure/security"
 	"github.com/globaltask/bank/internal/infrastructure/websocket"
 )
 
@@ -39,15 +40,22 @@ func main() {
 	log.Println("✅ Database connected")
 
 	// ==========================================
+	// 2.5 Security / Crypto
+	// ==========================================
+	encryptor, err := security.NewAESEncryptor()
+
+	// ==========================================
 	// 3. Repositories (Infrastructure Layer)
 	// ==========================================
 	dbPool := db.Pool()
-	loanAppRepo := repository.NewLoanApplicationRepository(dbPool)
+	loanAppRepo := repository.NewLoanApplicationRepository(dbPool, encryptor)
+	profileRepo := repository.NewProfileRepository(dbPool, encryptor)
 	countryRepo := repository.NewCountryRepository(dbPool)
+	countryRepo = repository.NewCachedCountryRepository(countryRepo, 1*time.Hour)
 	bankProviderRepo := repository.NewBankProviderRepository(dbPool)
 	workflowProviderRepo := repository.NewWorkflowProviderRepository(dbPool)
 	eventOutboxRepo := repository.NewEventOutboxRepository(dbPool)
-	uow := repository.NewPgUnitOfWork(dbPool)
+	uow := repository.NewPgUnitOfWork(dbPool, encryptor)
 
 	// ==========================================
 	// 3.5 WebSocket Hub
@@ -63,7 +71,7 @@ func main() {
 	// ==========================================
 	// 4. Services (Application Layer)
 	// ==========================================
-	identityService := auth.NewSupabaseIdentityService()
+	identityService := auth.NewSupabaseIdentityService(encryptor)
 
 	providerFactory := workflow.NewProviderFactory()
 	workflow.RegisterDefaultClients(providerFactory)
@@ -76,6 +84,7 @@ func main() {
 		workflowProviderRepo,
 		eventOutboxRepo,
 		identityService,
+		encryptor,
 		providerFactory,
 	)
 
@@ -121,7 +130,7 @@ func main() {
 		// WebSocket endpoint (no JWT for initial connection, or JWT in query param if needed)
 		v1.GET("/ws", handler.ServeWS(hub))
 
-		v1.Use(middleware.JWTAuth(repository.NewProfileRepository(dbPool)))
+		v1.Use(middleware.JWTAuth(profileRepo))
 		// Loan Applications
 		applications := v1.Group("/applications")
 		{

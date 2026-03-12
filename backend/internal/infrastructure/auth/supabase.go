@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/globaltask/bank/internal/infrastructure/security"
 	"github.com/globaltask/bank/internal/infrastructure/utils"
 	"github.com/google/uuid"
 )
@@ -18,12 +19,14 @@ import (
 type SupabaseIdentityService struct {
 	url            string
 	serviceRoleKey string
+	encryptor      security.Encryptor
 }
 
-func NewSupabaseIdentityService() *SupabaseIdentityService {
+func NewSupabaseIdentityService(encryptor security.Encryptor) *SupabaseIdentityService {
 	return &SupabaseIdentityService{
 		url:            os.Getenv("SUPABASE_URL"),
 		serviceRoleKey: os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
+		encryptor:      encryptor,
 	}
 }
 
@@ -38,15 +41,23 @@ func (s *SupabaseIdentityService) RegisterUser(ctx context.Context, name string,
 		password = "Password123!" // Fallback if not set
 	}
 
+	// Encrypt document and generate blind index
+	encryptedDoc, err := s.encryptor.Encrypt(doc)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to encrypt identity document: %w", err)
+	}
+	bidx := s.encryptor.GenerateBlindIndex(doc)
+
 	userData := map[string]interface{}{
 		"email":         email,
 		"password":      password,
 		"email_confirm": true, // Automatically confirm email
 		"user_metadata": map[string]interface{}{
-			"full_name":         name,
-			"identity_document": doc,
-			"country_id":        countryID,
-			"role":              "USER", // Automatically registered borrowers are always USERS
+			"full_name":              name,
+			"identity_document":      encryptedDoc,
+			"identity_document_bidx": bidx,
+			"country_id":             countryID,
+			"role":                   "USER", // Automatically registered borrowers are always USERS
 		},
 	}
 
