@@ -117,9 +117,35 @@ func (m *mockEventOutboxRepo) MarkFailed(ctx context.Context, id uuid.UUID, errM
 	return args.Error(0)
 }
 
+type mockProfileRepo struct {
+	mock.Mock
+}
+
+func (m *mockProfileRepo) GetByID(ctx context.Context, id uuid.UUID) (*entity.Profile, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*entity.Profile), args.Error(1)
+}
+
+func (m *mockProfileRepo) GetByIdentity(ctx context.Context, identityDocument string, countryID int) (*entity.Profile, error) {
+	args := m.Called(ctx, identityDocument, countryID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*entity.Profile), args.Error(1)
+}
+
+func (m *mockProfileRepo) Update(ctx context.Context, profile *entity.Profile) error {
+	args := m.Called(ctx, profile)
+	return args.Error(0)
+}
+
 type mockUnitOfWork struct {
-	loanRepo  repository.LoanApplicationRepository
-	eventRepo repository.EventOutboxRepository
+	loanRepo    repository.LoanApplicationRepository
+	eventRepo   repository.EventOutboxRepository
+	profileRepo repository.ProfileRepository
 }
 
 func (m *mockUnitOfWork) Do(ctx context.Context, fn func(repository.UnitOfWork) error) error {
@@ -132,6 +158,32 @@ func (m *mockUnitOfWork) LoanApplications() repository.LoanApplicationRepository
 
 func (m *mockUnitOfWork) EventOutbox() repository.EventOutboxRepository {
 	return m.eventRepo
+}
+
+func (m *mockUnitOfWork) Profiles() repository.ProfileRepository {
+	return m.profileRepo
+}
+
+type mockIdentityService struct {
+	mock.Mock
+}
+
+func (m *mockIdentityService) RegisterUser(ctx context.Context, name string, doc string, countryID int) (uuid.UUID, error) {
+	args := m.Called(ctx, name, doc, countryID)
+	return args.Get(0).(uuid.UUID), args.Error(1)
+}
+
+func (m *mockIdentityService) GetCountryIDByUserID(ctx context.Context, userID uuid.UUID) (int, error) {
+	args := m.Called(ctx, userID)
+	return args.Int(0), args.Error(1)
+}
+
+func (m *mockIdentityService) GetProfileByUserID(ctx context.Context, userID uuid.UUID) (*entity.Profile, error) {
+	args := m.Called(ctx, userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*entity.Profile), args.Error(1)
 }
 
 func TestWorkflowEngine_HandleEvaluateRisk(t *testing.T) {
@@ -185,22 +237,30 @@ func TestWorkflowEngine_HandleEvaluateRisk(t *testing.T) {
 			countryRepo := new(mockCountryRepo)
 			bankRepo := new(mockBankProviderRepo)
 			eventRepo := new(mockEventOutboxRepo)
-			uow := &mockUnitOfWork{loanRepo: loanRepo, eventRepo: eventRepo}
+			profileRepo := new(mockProfileRepo)
+			identityService := new(mockIdentityService)
+			uow := &mockUnitOfWork{loanRepo: loanRepo, eventRepo: eventRepo, profileRepo: profileRepo}
 
-			engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, eventRepo)
+			engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, eventRepo, identityService)
 			engine.config.RiskRules = map[string]RiskRule{
 				"PT": {MaxMonthlyPaymentPct: 0.35, MaxAmountMultiplier: 8.0},
 				"MX": {MaxMonthlyPaymentPct: 0.40, MaxAmountMultiplier: 10.0},
 			}
 
 			appID := uuid.New()
+			userID := uuid.New()
 			ctx := context.Background()
 
 			app := &entity.LoanApplication{
 				ID:              appID,
-				CountryID:       1,
+				UserID:          userID,
 				MonthlyIncome:   tt.monthlyIncome,
 				RequestedAmount: tt.requestedAmt,
+			}
+
+			profile := &entity.Profile{
+				ID:        userID,
+				CountryID: 1,
 			}
 
 			country := &entity.Country{
@@ -213,6 +273,7 @@ func TestWorkflowEngine_HandleEvaluateRisk(t *testing.T) {
 			}
 
 			loanRepo.On("GetByID", ctx, appID).Return(app, nil).Once()
+			profileRepo.On("GetByID", ctx, userID).Return(profile, nil).Once()
 			countryRepo.On("GetByID", ctx, 1).Return(country, nil).Once()
 			loanRepo.On("UpdateStatus", ctx, appID, tt.expectedStatus).Return(nil).Once()
 
@@ -221,6 +282,7 @@ func TestWorkflowEngine_HandleEvaluateRisk(t *testing.T) {
 
 			loanRepo.AssertExpectations(t)
 			countryRepo.AssertExpectations(t)
+			profileRepo.AssertExpectations(t)
 		})
 	}
 }
@@ -267,9 +329,10 @@ func TestWorkflowEngine_GetNextStep(t *testing.T) {
 			countryRepo := new(mockCountryRepo)
 			bankRepo := new(mockBankProviderRepo)
 			eventRepo := new(mockEventOutboxRepo)
+			identityService := new(mockIdentityService)
 			uow := &mockUnitOfWork{loanRepo: loanRepo, eventRepo: eventRepo}
 
-			engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, eventRepo)
+			engine := NewWorkflowEngine(uow, loanRepo, countryRepo, bankRepo, eventRepo, identityService)
 			engine.config.Workflows = map[string][]WorkflowStep{
 				"PT": {
 					{Event: string(entity.EventLoanApplicationCreated), Next: &step2},

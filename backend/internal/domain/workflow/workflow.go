@@ -40,6 +40,7 @@ type WorkflowEngine struct {
 	countryRepo      repository.CountryRepository
 	bankProviderRepo repository.BankProviderRepository
 	eventOutboxRepo  repository.EventOutboxRepository
+	identityService  entity.IdentityService
 	config           Config
 }
 
@@ -49,6 +50,7 @@ func NewWorkflowEngine(
 	countryRepo repository.CountryRepository,
 	bankProviderRepo repository.BankProviderRepository,
 	eventOutboxRepo repository.EventOutboxRepository,
+	identityService entity.IdentityService,
 ) *WorkflowEngine {
 	engine := &WorkflowEngine{
 		uow:              uow,
@@ -56,6 +58,7 @@ func NewWorkflowEngine(
 		countryRepo:      countryRepo,
 		bankProviderRepo: bankProviderRepo,
 		eventOutboxRepo:  eventOutboxRepo,
+		identityService:  identityService,
 	}
 	engine.loadConfig()
 	return engine
@@ -115,10 +118,20 @@ func (e *WorkflowEngine) HandleLoanApplicationCreated(ctx context.Context, event
 		return nil
 	}
 
-	country, err := e.countryRepo.GetByID(ctx, app.CountryID)
-
+	profile, err := e.uow.Profiles().GetByID(ctx, app.UserID)
 	if err != nil {
 		return err
+	}
+	if profile == nil {
+		return fmt.Errorf("profile not found for user %s", app.UserID)
+	}
+
+	country, err := e.countryRepo.GetByID(ctx, profile.CountryID)
+	if err != nil {
+		return err
+	}
+	if country == nil {
+		return fmt.Errorf("country not found for ID %d", profile.CountryID)
 	}
 
 	// Dynamic Next Step
@@ -163,16 +176,25 @@ func (e *WorkflowEngine) HandleFetchBankData(ctx context.Context, event *entity.
 		return ErrApplicationNotFound
 	}
 
-	// 1. Get available bank providers for the country
-	providers, err := e.bankProviderRepo.GetByCountryID(ctx, app.CountryID)
+	// 1. Get user profile for identity info
+	profile, err := e.uow.Profiles().GetByID(ctx, app.UserID)
+	if err != nil {
+		return err
+	}
+	if profile == nil {
+		return fmt.Errorf("profile not found for user %s", app.UserID)
+	}
+
+	// 2. Get available bank providers for the country
+	providers, err := e.bankProviderRepo.GetByCountryID(ctx, profile.CountryID)
 	if err != nil {
 		return err
 	}
 	if len(providers) == 0 {
-		return fmt.Errorf("no bank providers found for country %d", app.CountryID)
+		return fmt.Errorf("no bank providers found for country %d", profile.CountryID)
 	}
 
-	// 2. Strategy: Select provider (Simple strategy: first one for now, could be based on amount/identity)
+	// 3. Strategy: Select provider (Simple strategy: first one for now, could be based on amount/identity)
 	provider := providers[0]
 	mockBankURL := "http://mock-bank:8081/validate" // Default fallback
 
@@ -182,11 +204,11 @@ func (e *WorkflowEngine) HandleFetchBankData(ctx context.Context, event *entity.
 
 	log.Printf("Selected provider %s for application %s", provider.ProviderName, app.ID)
 
-	// 3. Call selected bank provider
+	// 4. Call selected bank provider
 	bankPayload := map[string]interface{}{
 		"application_id":    app.ID.String(),
-		"borrower_name":     app.BorrowerName,
-		"identity_document": app.IdentityDocument,
+		"borrower_name":     profile.FullName,
+		"identity_document": profile.IdentityDocument,
 		"amount":            app.RequestedAmount,
 		"provider":          provider.ProviderName,
 	}
@@ -234,17 +256,26 @@ func (e *WorkflowEngine) HandleValidateUserIdentity(ctx context.Context, event *
 		return nil
 	}
 
+	// Get user profile for identity verification
+	profile, err := e.uow.Profiles().GetByID(ctx, app.UserID)
+	if err != nil {
+		return err
+	}
+	if profile == nil {
+		return fmt.Errorf("profile not found for user %s", app.UserID)
+	}
+
 	bankID, _ := app.BankInformation["identity_document"].(string)
 	bankName, _ := app.BankInformation["borrower_name"].(string)
 
 	isValid := true
-	if bankID != app.IdentityDocument {
-		log.Printf("Identity Verification Failed: ID mismatch (provided: %s, bank: %s)", app.IdentityDocument, bankID)
+	if bankID != profile.IdentityDocument {
+		log.Printf("Identity Verification Failed: ID mismatch (provided: %s, bank: %s)", profile.IdentityDocument, bankID)
 		isValid = false
 	}
 
-	if app.BorrowerName != "" && bankName != "" && bankName != app.BorrowerName {
-		log.Printf("Identity Verification Failed: Name mismatch (provided: %s, bank: %s)", app.BorrowerName, bankName)
+	if profile.FullName != "" && bankName != "" && bankName != profile.FullName {
+		log.Printf("Identity Verification Failed: Name mismatch (provided: %s, bank: %s)", profile.FullName, bankName)
 		isValid = false
 	}
 
@@ -253,7 +284,7 @@ func (e *WorkflowEngine) HandleValidateUserIdentity(ctx context.Context, event *
 	}
 
 	// Dynamic Next Step
-	countryObj, _ := e.countryRepo.GetByID(ctx, app.CountryID)
+	countryObj, _ := e.countryRepo.GetByID(ctx, profile.CountryID)
 	nextStep := e.GetNextStep(countryObj.ISOCode, string(entity.EventValidateUserIdentity))
 	if nextStep == nil {
 		return nil
@@ -288,10 +319,24 @@ func (e *WorkflowEngine) HandleEvaluateRisk(ctx context.Context, event *entity.E
 	if err != nil {
 		return err
 	}
+	if app == nil {
+		return ErrApplicationNotFound
+	}
 
-	country, err := e.countryRepo.GetByID(ctx, app.CountryID)
+	profile, err := e.uow.Profiles().GetByID(ctx, app.UserID)
 	if err != nil {
 		return err
+	}
+	if profile == nil {
+		return fmt.Errorf("profile not found for user %s", app.UserID)
+	}
+
+	country, err := e.countryRepo.GetByID(ctx, profile.CountryID)
+	if err != nil {
+		return err
+	}
+	if country == nil {
+		return fmt.Errorf("country not found for ID %d", profile.CountryID)
 	}
 
 	// Dynamic Risk Rules

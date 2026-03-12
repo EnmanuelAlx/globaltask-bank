@@ -9,6 +9,7 @@ import (
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/gin-gonic/gin"
+	"github.com/globaltask/bank/internal/infrastructure/repository"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
@@ -47,8 +48,8 @@ func InitJWKS() {
 	})
 }
 
-// JWTAuth middleware validates JWT tokens from Supabase
-func JWTAuth() gin.HandlerFunc {
+// JWTAuth middleware validates JWT tokens from Supabase and fetches the user's role from their profile.
+func JWTAuth(profileRepo repository.ProfileRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -129,14 +130,25 @@ func JWTAuth() gin.HandlerFunc {
 			return
 		}
 
-		// Get role from claims (default to USER if not present)
+		// Set userID first so it can be used by GetUserID if needed
+		c.Set("user_id", userID)
+
+		// Get role from profile table instead of relying only on claims
 		role := "USER"
-		if roleClaim, ok := claims["role"].(string); ok {
-			role = roleClaim
+		if profileRepo != nil {
+			profile, err := profileRepo.GetByID(c.Request.Context(), userID)
+			if err == nil && profile != nil {
+				role = profile.Role
+			} else if err != nil {
+				log.Printf("Failed to fetch profile for user %s: %v", userID, err)
+			}
+		} else {
+			// Fallback to claims if no profile repository provided
+			if roleClaim, ok := claims["role"].(string); ok {
+				role = roleClaim
+			}
 		}
 
-		// Set context values
-		c.Set("user_id", userID)
 		c.Set("user_role", role)
 
 		c.Next()

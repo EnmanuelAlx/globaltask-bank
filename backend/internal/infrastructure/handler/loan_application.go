@@ -36,6 +36,7 @@ func (h *LoanApplicationHandler) CreateApplication(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
+	role := middleware.GetUserRole(c)
 
 	app, err := h.loanService.CreateApplication(c.Request.Context(), &service.CreateApplicationInput{
 		UserID:           userID,
@@ -44,8 +45,13 @@ func (h *LoanApplicationHandler) CreateApplication(c *gin.Context) {
 		IdentityDocument: req.IdentityDocument,
 		RequestedAmount:  req.RequestedAmount,
 		MonthlyIncome:    req.MonthlyIncome,
+		UserRole:         role,
 	})
 	if err != nil {
+		if err == service.ErrUnauthorized {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

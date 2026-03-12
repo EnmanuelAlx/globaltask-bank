@@ -7,13 +7,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Create Supabase schemas
 CREATE SCHEMA IF NOT EXISTS auth;
 
--- Profiles table
-CREATE TABLE IF NOT EXISTS public.profiles (
-    id UUID PRIMARY KEY,
-    full_name VARCHAR(255),
-    role VARCHAR(50) NOT NULL DEFAULT 'USER' CHECK (role IN ('ADMIN', 'USER')),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+
 
 -- Countries table
 CREATE TABLE IF NOT EXISTS public.countries (
@@ -21,6 +15,18 @@ CREATE TABLE IF NOT EXISTS public.countries (
     iso_code VARCHAR(3) NOT NULL UNIQUE,
     name VARCHAR(255) NOT NULL,
     currency VARCHAR(10) NOT NULL
+);
+
+-- Profiles table
+
+CREATE TABLE IF NOT EXISTS public.profiles (
+    id UUID PRIMARY KEY,
+    full_name VARCHAR(255),
+    identity_document VARCHAR(50),
+    country_id INTEGER REFERENCES public.countries(id),
+    role VARCHAR(50) NOT NULL DEFAULT 'USER' CHECK (role IN ('ADMIN', 'USER')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE (identity_document, country_id)
 );
 
 -- Bank providers table
@@ -36,9 +42,6 @@ CREATE TABLE IF NOT EXISTS public.bank_providers (
 CREATE TABLE IF NOT EXISTS public.loan_applications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES public.profiles(id),
-    country_id INTEGER NOT NULL REFERENCES countries(id),
-    borrower_name VARCHAR(255),
-    identity_document VARCHAR(50) NOT NULL,
     requested_amount NUMERIC(15, 2) NOT NULL,
     monthly_income NUMERIC(15, 2) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'DRAFT'
@@ -100,14 +103,18 @@ CREATE TRIGGER update_loan_applications_updated_at
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-    INSERT INTO public.profiles (id, full_name, role)
+    INSERT INTO public.profiles (id, full_name, identity_document, country_id, role)
     VALUES (
         new.id,
         COALESCE(new.raw_user_meta_data->>'full_name', 'User'),
-        CASE
-            WHEN new.email LIKE '%@globaltask%' THEN 'ADMIN'
-            ELSE 'USER'
-        END
+        new.raw_user_meta_data->>'identity_document',
+        (new.raw_user_meta_data->>'country_id')::INTEGER,
+        COALESCE(new.raw_user_meta_data->>'role', 
+            CASE
+                WHEN new.email LIKE '%@globaltask%' THEN 'ADMIN' -- This is not safe but is done for simplicity.
+                ELSE 'USER'
+            END
+        )
     );
     RETURN NEW;
 END;
@@ -120,8 +127,21 @@ CREATE TRIGGER on_auth_user_created
 -- Real-time notifications for loan applications
 CREATE OR REPLACE FUNCTION public.notify_loan_application_update()
 RETURNS TRIGGER AS $$
+DECLARE
+    full_row JSON;
 BEGIN
-    PERFORM pg_notify('loan_application_updates', row_to_json(NEW)::text);
+    SELECT row_to_json(r) INTO full_row
+    FROM (
+        SELECT l.*,
+               COALESCE(p.full_name, '') AS borrower_name,
+               COALESCE(p.identity_document, '') AS identity_document,
+               COALESCE(p.country_id, 0) AS country_id
+        FROM public.loan_applications l
+        JOIN public.profiles p ON l.user_id = p.id
+        WHERE l.id = NEW.id
+    ) r;
+
+    PERFORM pg_notify('loan_application_updates', full_row::text);
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

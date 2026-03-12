@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/globaltask/bank/internal/application/service"
 	"github.com/globaltask/bank/internal/domain/workflow"
+	"github.com/globaltask/bank/internal/infrastructure/auth"
 	"github.com/globaltask/bank/internal/infrastructure/database"
 	"github.com/globaltask/bank/internal/infrastructure/handler"
 	"github.com/globaltask/bank/internal/infrastructure/middleware"
@@ -61,12 +62,15 @@ func main() {
 	// ==========================================
 	// 4. Services (Application Layer)
 	// ==========================================
+	identityService := auth.NewSupabaseIdentityService()
+
 	workflowEngine := workflow.NewWorkflowEngine(
 		uow,
 		loanAppRepo,
 		countryRepo,
 		bankProviderRepo,
 		eventOutboxRepo,
+		identityService,
 	)
 
 	loanService := service.NewLoanApplicationService(
@@ -75,6 +79,7 @@ func main() {
 		countryRepo,
 		bankProviderRepo,
 		eventOutboxRepo,
+		identityService,
 		workflowEngine,
 	)
 
@@ -110,7 +115,7 @@ func main() {
 		// WebSocket endpoint (no JWT for initial connection, or JWT in query param if needed)
 		v1.GET("/ws", handler.ServeWS(hub))
 
-		v1.Use(middleware.JWTAuth()) // All other routes require JWT
+		v1.Use(middleware.JWTAuth(repository.NewProfileRepository(dbPool)))
 		// Loan Applications
 		applications := v1.Group("/applications")
 		{

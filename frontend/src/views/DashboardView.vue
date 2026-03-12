@@ -1,7 +1,7 @@
 <template>
   <DashboardLayout>
     <template #header-actions>
-      <BaseButton @click="showModal = true" class="px-5 py-2 rounded-lg" label="New Application">
+      <BaseButton @click="handleNewApplicationClick" class="px-5 py-2 rounded-lg" label="New Application">
         <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
       </BaseButton>
     </template>
@@ -84,10 +84,10 @@
               <td class="px-6 py-4">
                 <div class="flex items-center gap-3 text-slate-900">
                   <div class="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold">
-                    {{ app.borrower_name.charAt(0) }}
+                    {{ app.borrower_name?.charAt(0) || '?' }}
                   </div>
                   <div>
-                    <div class="font-bold text-slate-800">{{ app.borrower_name }}</div>
+                    <div class="font-bold text-slate-800">{{ app.borrower_name || 'Anonymous' }}</div>
                     <div class="text-xs text-slate-400 font-mono tracking-tight">{{ app.identity_document }}</div>
                   </div>
                 </div>
@@ -198,11 +198,27 @@ import BaseButton from '../components/BaseButton.vue'
 import BaseInput from '../components/BaseInput.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import BaseModal from '../components/BaseModal.vue'
+import { useAuthStore } from '../stores/auth'
 
 const loanStore = useLoanStore()
 const countryStore = useCountryStore()
 
+const authStore = useAuthStore()
+
 const showModal = ref(false)
+
+const handleNewApplicationClick = () => {
+  // Check if user is admin based on metadata or session
+  const role = authStore.user?.user_metadata?.role || authStore.user?.app_metadata?.role || 'USER'
+
+  if (role !== 'ADMIN') {
+    alert("Only administrators can create new loan applications. Please contact support if you need assistance.")
+    return
+  }
+
+  showModal.value = true
+}
+
 const filters = ref({
   borrower_name: '',
   identity_document: '',

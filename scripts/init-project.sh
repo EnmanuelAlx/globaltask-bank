@@ -42,7 +42,9 @@ PASS="password123"
 # Extract service_role key and API URL for local Supabase
 STATUS_JSON=$(supabase status --workdir infra -o json)
 SERVICE_ROLE_KEY=$(echo "$STATUS_JSON" | grep '"SERVICE_ROLE_KEY":' | sed -E 's/.*"SERVICE_ROLE_KEY": "(.*)",?/\1/' | tr -d '", ')
+ANON_KEY=$(echo "$STATUS_JSON" | grep '"ANON_KEY":' | sed -E 's/.*"ANON_KEY": "(.*)",?/\1/' | tr -d '", ')
 API_URL=$(echo "$STATUS_JSON" | grep '"API_URL":' | sed -E 's/.*"API_URL": "(.*)",?/\1/' | tr -d '", ')
+DB_URL=$(echo "$STATUS_JSON" | grep '"DB_URL":' | sed -E 's/.*"DB_URL": "(.*)",?/\1/' | tr -d '", ')
 
 # Create user via Supabase API
 USER_RESPONSE=$(curl -s -X POST "$API_URL/auth/v1/admin/users" \
@@ -53,7 +55,8 @@ USER_RESPONSE=$(curl -s -X POST "$API_URL/auth/v1/admin/users" \
     \"password\": \"$PASS\",
     \"email_confirm\": true,
     \"user_metadata\": {
-      \"full_name\": \"Admin\"
+      \"full_name\": \"Admin\",
+      \"role\": \"ADMIN\"
     }
   }")
 
@@ -70,15 +73,12 @@ fi
 echo -e "\n${GREEN}✨ Initialization Complete!${NC}"
 echo -e "${BLUE}--------------------------------------------------${NC}"
 
-# Extract ANON_KEY and DB_URL (API_URL ya lo tenemos de arriba)
-ANON_KEY=$(echo "$STATUS_JSON" | grep '"ANON_KEY":' | sed -E 's/.*"ANON_KEY": "(.*)",?/\1/' | tr -d '", ')
-DB_URL=$(echo "$STATUS_JSON" | grep '"DB_URL":' | sed -E 's/.*"DB_URL": "(.*)",?/\1/' | tr -d '", ')
-
 echo -e "${GREEN}🔑 Supabase Info:${NC}"
 echo -e "   ${YELLOW}Supabase URL:${NC} $API_URL"
 echo -e "   ${YELLOW}Database URL:${NC} $DB_URL"
 echo -e "   ${YELLOW}JWKS URL:${NC}     $API_URL/auth/v1/.well-known/jwks.json"
 echo -e "   ${YELLOW}Anon Key:${NC}     $ANON_KEY"
+echo -e "   ${YELLOW}Service Role Key:${NC} $SERVICE_ROLE_KEY"
 echo -e ""
 echo -e "${GREEN}👤 User Credentials:${NC}"
 echo -e "   ${YELLOW}Email:${NC}    $EMAIL"

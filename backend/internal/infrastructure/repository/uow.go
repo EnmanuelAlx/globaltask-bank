@@ -19,6 +19,7 @@ type UnitOfWork interface {
 	Do(ctx context.Context, fn func(UnitOfWork) error) error
 	LoanApplications() LoanApplicationRepository
 	EventOutbox() EventOutboxRepository
+	Profiles() ProfileRepository
 }
 
 type pgUnitOfWork struct {
@@ -70,4 +71,11 @@ func (u *pgUnitOfWork) EventOutbox() EventOutboxRepository {
 		return NewEventOutboxRepository(u.tx)
 	}
 	return NewEventOutboxRepository(u.pool)
+}
+
+func (u *pgUnitOfWork) Profiles() ProfileRepository {
+	if u.tx != nil {
+		return NewProfileRepository(u.tx)
+	}
+	return NewProfileRepository(u.pool)
 }

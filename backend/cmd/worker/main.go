@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/globaltask/bank/internal/domain/workflow"
+	"github.com/globaltask/bank/internal/infrastructure/auth"
 	"github.com/globaltask/bank/internal/infrastructure/database"
 	"github.com/globaltask/bank/internal/infrastructure/repository"
 	"github.com/globaltask/bank/internal/infrastructure/worker"
@@ -51,12 +52,15 @@ func main() {
 	bankProviderRepo := repository.NewBankProviderRepository(dbPool)
 	uow := repository.NewPgUnitOfWork(dbPool)
 
+	identityService := auth.NewSupabaseIdentityService()
+
 	workflowEngine := workflow.NewWorkflowEngine(
 		uow,
 		loanAppRepo,
 		countryRepo,
 		bankProviderRepo,
 		eventOutboxRepo,
+		identityService,
 	)
 
 	// ==========================================

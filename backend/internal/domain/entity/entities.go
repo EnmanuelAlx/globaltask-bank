@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -41,11 +42,13 @@ func (j JSONB) Value() (interface{}, error) {
 // Entities
 // ==========================================
 
-// User represents a user managed by Supabase Auth
-type User struct {
-	ID       uuid.UUID `json:"id"`
-	FullName string    `json:"full_name"`
-	Role     string    `json:"role"` // 'ADMIN' or 'USER'
+// Profile represents a user profile managed by Supabase Auth
+type Profile struct {
+	ID               uuid.UUID `json:"id"`
+	FullName         string    `json:"full_name"`
+	IdentityDocument string    `json:"identity_document"`
+	CountryID        int       `json:"country_id"`
+	Role             string    `json:"role"` // 'ADMIN' or 'USER'
 }
 
 // Country represents a country with specific business rules
@@ -80,9 +83,9 @@ const (
 type LoanApplication struct {
 	ID               uuid.UUID             `json:"id"`
 	UserID           uuid.UUID             `json:"user_id"`
-	CountryID        int                   `json:"country_id"`
-	BorrowerName     string                `json:"borrower_name"`
-	IdentityDocument string                `json:"identity_document"`
+	BorrowerName     string                `json:"borrower_name"`     // From Profile
+	IdentityDocument string                `json:"identity_document"` // From Profile
+	CountryID        int                   `json:"country_id"`        // From Profile
 	RequestedAmount  float64               `json:"requested_amount"`
 	MonthlyIncome    float64               `json:"monthly_income"`
 	Status           LoanApplicationStatus `json:"status"`
@@ -167,6 +170,11 @@ type Money struct {
 // ==========================================
 // Business Rules Interfaces
 // ==========================================
+
+// IdentityService defines methods to interact with the identity provider (Auth)
+type IdentityService interface {
+	RegisterUser(ctx context.Context, name string, doc string, countryID int) (uuid.UUID, error)
+}
 
 // CountryRule defines validation rules for a specific country
 type CountryRule interface {

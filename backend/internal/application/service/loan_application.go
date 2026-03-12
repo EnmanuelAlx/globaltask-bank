@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -18,6 +19,7 @@ type CreateApplicationInput struct {
 	IdentityDocument string
 	RequestedAmount  float64
 	MonthlyIncome    float64
+	UserRole         string
 }
 
 type UpdateApplicationInput struct {
@@ -31,6 +33,7 @@ type LoanApplicationService struct {
 	countryRepo      repository.CountryRepository
 	bankProviderRepo repository.BankProviderRepository
 	eventOutboxRepo  repository.EventOutboxRepository
+	identityService  entity.IdentityService
 	workflowEngine   *workflow.WorkflowEngine
 }
 
@@ -40,6 +43,7 @@ func NewLoanApplicationService(
 	countryRepo repository.CountryRepository,
 	bankProviderRepo repository.BankProviderRepository,
 	eventOutboxRepo repository.EventOutboxRepository,
+	identityService entity.IdentityService,
 	workflowEngine *workflow.WorkflowEngine,
 ) *LoanApplicationService {
 	return &LoanApplicationService{
@@ -48,11 +52,47 @@ func NewLoanApplicationService(
 		countryRepo:      countryRepo,
 		bankProviderRepo: bankProviderRepo,
 		eventOutboxRepo:  eventOutboxRepo,
+		identityService:  identityService,
 		workflowEngine:   workflowEngine,
 	}
 }
 
 func (s *LoanApplicationService) CreateApplication(ctx context.Context, input *CreateApplicationInput) (*entity.LoanApplication, error) {
+	// Only ADMIN role is allowed to create loan applications in the current phase.
+	if input.UserRole != "ADMIN" {
+		return nil, ErrUnauthorized
+	}
+
+	userID := uuid.Nil
+
+	// Since we are in the ADMIN flow, we ALWAYS handle registration/lookup via identity document,
+	// ignoring any provided UserID in the input to ensure correct borrower assignment.
+	if input.IdentityDocument == "" {
+		return nil, fmt.Errorf("identity document is required for admin-led applications")
+	}
+
+	var err error
+	profile, err := s.uow.Profiles().GetByIdentity(ctx, input.IdentityDocument, input.CountryID)
+	if err != nil {
+		return nil, err
+	}
+
+	if profile != nil {
+		userID = profile.ID
+	}
+
+	if userID == uuid.Nil {
+		// Register new user
+		userID, err = s.identityService.RegisterUser(ctx, input.BorrowerName, input.IdentityDocument, input.CountryID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if userID == uuid.Nil {
+		return nil, fmt.Errorf("user_id is required for non-admin requests or missing identity info")
+	}
+
 	// Validate country exists
 	country, err := s.countryRepo.GetByID(ctx, input.CountryID)
 	if err != nil {
@@ -64,17 +104,14 @@ func (s *LoanApplicationService) CreateApplication(ctx context.Context, input *C
 
 	now := time.Now()
 	app := &entity.LoanApplication{
-		ID:               uuid.New(),
-		UserID:           input.UserID,
-		CountryID:        input.CountryID,
-		BorrowerName:     input.BorrowerName,
-		IdentityDocument: input.IdentityDocument,
-		RequestedAmount:  input.RequestedAmount,
-		MonthlyIncome:    input.MonthlyIncome,
-		Status:           entity.StatusPendingValidation,
-		RequestedAt:      now,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		ID:              uuid.New(),
+		UserID:          userID,
+		RequestedAmount: input.RequestedAmount,
+		MonthlyIncome:   input.MonthlyIncome,
+		Status:          entity.StatusPendingValidation,
+		RequestedAt:     now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 
 	// Create initial event in outbox
@@ -101,7 +138,8 @@ func (s *LoanApplicationService) CreateApplication(ctx context.Context, input *C
 		return nil, err
 	}
 
-	return app, nil
+	// Return the fully populated application (with profile data)
+	return s.loanAppRepo.GetByID(ctx, app.ID)
 }
 
 func (s *LoanApplicationService) GetApplicationByID(ctx context.Context, id string) (*entity.LoanApplication, error) {
@@ -173,7 +211,15 @@ func (s *LoanApplicationService) HandleBankWebhook(ctx context.Context, applicat
 	}
 
 	// Dynamic Next Step
-	country, err := s.countryRepo.GetByID(ctx, app.CountryID)
+	profile, err := s.uow.Profiles().GetByID(ctx, app.UserID)
+	if err != nil {
+		return err
+	}
+	if profile == nil {
+		return fmt.Errorf("profile not found for user %s", app.UserID)
+	}
+
+	country, err := s.countryRepo.GetByID(ctx, profile.CountryID)
 	if err != nil || country == nil {
 		return ErrCountryNotFound
 	}
@@ -208,6 +254,7 @@ func (s *LoanApplicationService) HandleBankWebhook(ctx context.Context, applicat
 var (
 	ErrCountryNotFound     = &AppError{Code: "COUNTRY_NOT_FOUND", Message: "country not found"}
 	ErrApplicationNotFound = &AppError{Code: "APPLICATION_NOT_FOUND", Message: "application not found"}
+	ErrUnauthorized        = &AppError{Code: "UNAUTHORIZED", Message: "only administrators are authorized to create loan applications"}
 )
 
 type AppError struct {
