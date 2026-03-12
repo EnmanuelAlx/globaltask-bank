@@ -50,24 +50,30 @@ func main() {
 	eventOutboxRepo := repository.NewEventOutboxRepository(dbPool)
 	countryRepo := repository.NewCountryRepository(dbPool)
 	bankProviderRepo := repository.NewBankProviderRepository(dbPool)
+	workflowProviderRepo := repository.NewWorkflowProviderRepository(dbPool)
 	uow := repository.NewPgUnitOfWork(dbPool)
 
 	identityService := auth.NewSupabaseIdentityService()
+
+	providerFactory := workflow.NewProviderFactory()
+	workflow.RegisterDefaultClients(providerFactory)
 
 	workflowEngine := workflow.NewWorkflowEngine(
 		uow,
 		loanAppRepo,
 		countryRepo,
 		bankProviderRepo,
+		workflowProviderRepo,
 		eventOutboxRepo,
 		identityService,
+		providerFactory,
 	)
 
 	// ==========================================
 	// 5. Worker Pool
 	// ==========================================
 	workerPool := worker.NewWorkerPool(
-		eventOutboxRepo,
+		uow,
 		workflowEngine,
 		concurrency,
 	)

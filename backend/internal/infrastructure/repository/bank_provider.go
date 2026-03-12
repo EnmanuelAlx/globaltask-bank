@@ -21,9 +21,9 @@ func NewBankProviderRepository(db DBTX) BankProviderRepository {
 }
 
 func (r *bankProviderRepo) GetByID(ctx context.Context, id int) (*entity.BankProvider, error) {
-	query := `SELECT id, country_id, provider_name, api_config FROM bank_providers WHERE id = $1`
+	query := `SELECT id, country_id, provider_name, base_url, api_config FROM bank_providers WHERE id = $1`
 	var bp entity.BankProvider
-	err := r.db.QueryRow(ctx, query, id).Scan(&bp.ID, &bp.CountryID, &bp.ProviderName, &bp.APIConfig)
+	err := r.db.QueryRow(ctx, query, id).Scan(&bp.ID, &bp.CountryID, &bp.ProviderName, &bp.BaseURL, &bp.APIConfig)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -31,7 +31,7 @@ func (r *bankProviderRepo) GetByID(ctx context.Context, id int) (*entity.BankPro
 }
 
 func (r *bankProviderRepo) GetByCountryID(ctx context.Context, countryID int) ([]*entity.BankProvider, error) {
-	query := `SELECT id, country_id, provider_name, api_config FROM bank_providers WHERE country_id = $1`
+	query := `SELECT id, country_id, provider_name, base_url, api_config FROM bank_providers WHERE country_id = $1`
 	rows, err := r.db.Query(ctx, query, countryID)
 	if err != nil {
 		return nil, err
@@ -41,7 +41,7 @@ func (r *bankProviderRepo) GetByCountryID(ctx context.Context, countryID int) ([
 	var providers []*entity.BankProvider
 	for rows.Next() {
 		var bp entity.BankProvider
-		if err := rows.Scan(&bp.ID, &bp.CountryID, &bp.ProviderName, &bp.APIConfig); err != nil {
+		if err := rows.Scan(&bp.ID, &bp.CountryID, &bp.ProviderName, &bp.BaseURL, &bp.APIConfig); err != nil {
 			return nil, err
 		}
 		providers = append(providers, &bp)

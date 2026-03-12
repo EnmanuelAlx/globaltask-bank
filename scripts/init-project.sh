@@ -56,7 +56,9 @@ USER_RESPONSE=$(curl -s -X POST "$API_URL/auth/v1/admin/users" \
     \"email_confirm\": true,
     \"user_metadata\": {
       \"full_name\": \"Admin\",
-      \"role\": \"ADMIN\"
+      \"role\": \"ADMIN\",
+      \"identity_document\": \"1\",
+      \"country_id\": \"1\"
     }
   }")
 
@@ -85,4 +87,4 @@ echo -e "   ${YELLOW}Email:${NC}    $EMAIL"
 echo -e "   ${YELLOW}Password:${NC} $PASS"
 echo -e "${BLUE}--------------------------------------------------${NC}"
 
-echo -e "${YELLOW}👉 Next Step: Run '${NC}${GREEN}make up${NC}${YELLOW}' to build and start the containers.${NC}"
+echo -e "${YELLOW}👉 Next Step: Modify .env file and run '${NC}${GREEN}make up${NC}${YELLOW}' to build and start the containers.${NC}"

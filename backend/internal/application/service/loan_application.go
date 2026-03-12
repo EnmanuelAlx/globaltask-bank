@@ -186,68 +186,76 @@ func (s *LoanApplicationService) HandleBankWebhook(ctx context.Context, applicat
 		return err
 	}
 
-	app, err := s.loanAppRepo.GetByID(ctx, appUUID)
-	if err != nil || app == nil {
-		return ErrApplicationNotFound
-	}
+	return s.uow.Do(ctx, func(uow repository.UnitOfWork) error {
+		// Use GetByIDForUpdate to lock the application row
+		app, err := uow.LoanApplications().GetByIDForUpdate(ctx, appUUID)
+		if err != nil {
+			return err
+		}
+		if app == nil {
+			return ErrApplicationNotFound
+		}
 
-	// Update bank information
-	app.BankInformation = entity.JSONB(payload)
-	app.Status = entity.StatusAnalyzingRisk
-	app.UpdatedAt = time.Now()
+		// Idempotency check: if status is already beyond fetching bank data, skip
+		// StatusAnalyzingRisk means the bank data has already been received and processed.
+		if app.Status == entity.StatusAnalyzingRisk || app.Status == entity.StatusApproved || app.Status == entity.StatusRejected {
+			return nil
+		}
 
-	// Update monthly income if provided by the bank (trust the bank's data)
-	if incomeVal, ok := payload["monthly_income"]; ok {
-		switch v := incomeVal.(type) {
-		case float64:
-			app.MonthlyIncome = v
-		case int:
-			app.MonthlyIncome = float64(v)
-		case string:
-			if f, err := strconv.ParseFloat(v, 64); err == nil {
-				app.MonthlyIncome = f
+		// Update bank information
+		app.BankInformation = entity.JSONB(payload)
+		app.Status = entity.StatusAnalyzingRisk
+		app.UpdatedAt = time.Now()
+
+		// Update monthly income if provided by the bank (trust the bank's data)
+		if incomeVal, ok := payload["monthly_income"]; ok {
+			switch v := incomeVal.(type) {
+			case float64:
+				app.MonthlyIncome = v
+			case int:
+				app.MonthlyIncome = float64(v)
+			case string:
+				if f, err := strconv.ParseFloat(v, 64); err == nil {
+					app.MonthlyIncome = f
+				}
 			}
 		}
-	}
 
-	// Dynamic Next Step
-	profile, err := s.uow.Profiles().GetByID(ctx, app.UserID)
-	if err != nil {
-		return err
-	}
-	if profile == nil {
-		return fmt.Errorf("profile not found for user %s", app.UserID)
-	}
+		// Dynamic Next Step
+		profile, err := uow.Profiles().GetByID(ctx, app.UserID)
+		if err != nil {
+			return err
+		}
+		if profile == nil {
+			return fmt.Errorf("profile not found for user %s", app.UserID)
+		}
 
-	country, err := s.countryRepo.GetByID(ctx, profile.CountryID)
-	if err != nil || country == nil {
-		return ErrCountryNotFound
-	}
+		country, err := s.countryRepo.GetByID(ctx, profile.CountryID)
+		if err != nil || country == nil {
+			return ErrCountryNotFound
+		}
 
-	nextStep := s.workflowEngine.GetNextStep(country.ISOCode, string(entity.EventFetchBankData))
-	if nextStep == nil {
-		// End of workflow or no more steps defined
-		return s.loanAppRepo.Update(ctx, app)
-	}
+		nextStep := s.workflowEngine.GetNextStep(country.ISOCode, string(entity.EventFetchBankData))
+		if nextStep == nil {
+			// End of workflow or no more steps defined
+			return uow.LoanApplications().Update(ctx, app)
+		}
 
-	// Create next event based on configuration
-	event := &entity.EventOutbox{
-		ID:        uuid.New(),
-		EventType: entity.EventType(*nextStep),
-		Payload:   entity.JSONB{"application_id": app.ID.String()},
-		Status:    entity.EventStatusPending,
-		CreatedAt: time.Now(),
-	}
+		// Create next event based on configuration
+		event := &entity.EventOutbox{
+			ID:        uuid.New(),
+			EventType: entity.EventType(*nextStep),
+			Payload:   entity.JSONB{"application_id": app.ID.String()},
+			Status:    entity.EventStatusPending,
+			CreatedAt: time.Now(),
+		}
 
-	// Update application and create event atomically
-	err = s.uow.Do(ctx, func(uow repository.UnitOfWork) error {
+		// Update application and create event atomically
 		if err := uow.LoanApplications().Update(ctx, app); err != nil {
 			return err
 		}
 		return uow.EventOutbox().Create(ctx, event)
 	})
-
-	return err
 }
 
 // Errors

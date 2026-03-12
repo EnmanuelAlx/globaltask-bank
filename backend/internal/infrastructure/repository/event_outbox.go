@@ -11,6 +11,7 @@ import (
 type EventOutboxRepository interface {
 	Create(ctx context.Context, event *entity.EventOutbox) error
 	GetPending(ctx context.Context, limit int) ([]*entity.EventOutbox, error)
+	Claim(ctx context.Context, limit int) ([]*entity.EventOutbox, error)
 	Lock(ctx context.Context, id uuid.UUID) (bool, error)
 	Unlock(ctx context.Context, id uuid.UUID) error
 	MarkDone(ctx context.Context, id uuid.UUID) error
@@ -52,6 +53,43 @@ func (r *eventOutboxRepo) GetPending(ctx context.Context, limit int) ([]*entity.
 	`
 
 	rows, err := r.db.Query(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []*entity.EventOutbox
+	for rows.Next() {
+		var e entity.EventOutbox
+		err := rows.Scan(&e.ID, &e.EventType, &e.Payload, &e.Status, &e.CreatedAt, &e.LockedAt)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, &e)
+	}
+	return events, nil
+}
+
+// Claim atomically claims pending events for processing using UPDATE ... RETURNING with SKIP LOCKED
+func (r *eventOutboxRepo) Claim(ctx context.Context, limit int) ([]*entity.EventOutbox, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+
+	query := `
+		UPDATE event_outbox
+		SET status = 'PROCESSING', locked_at = $2
+		WHERE id IN (
+			SELECT id FROM event_outbox
+			WHERE status = 'PENDING'
+			ORDER BY created_at ASC
+			LIMIT $1
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING id, event_type, payload, status, created_at, locked_at
+	`
+
+	rows, err := r.db.Query(ctx, query, limit, time.Now())
 	if err != nil {
 		return nil, err
 	}

@@ -64,6 +64,7 @@ type BankProvider struct {
 	ID           int    `json:"id"`
 	CountryID    int    `json:"country_id"`
 	ProviderName string `json:"provider_name"`
+	BaseURL      string `json:"base_url"`
 	APIConfig    JSONB  `json:"api_config"`
 }
 

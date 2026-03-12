@@ -45,6 +45,7 @@ func main() {
 	loanAppRepo := repository.NewLoanApplicationRepository(dbPool)
 	countryRepo := repository.NewCountryRepository(dbPool)
 	bankProviderRepo := repository.NewBankProviderRepository(dbPool)
+	workflowProviderRepo := repository.NewWorkflowProviderRepository(dbPool)
 	eventOutboxRepo := repository.NewEventOutboxRepository(dbPool)
 	uow := repository.NewPgUnitOfWork(dbPool)
 
@@ -64,13 +65,18 @@ func main() {
 	// ==========================================
 	identityService := auth.NewSupabaseIdentityService()
 
+	providerFactory := workflow.NewProviderFactory()
+	workflow.RegisterDefaultClients(providerFactory)
+
 	workflowEngine := workflow.NewWorkflowEngine(
 		uow,
 		loanAppRepo,
 		countryRepo,
 		bankProviderRepo,
+		workflowProviderRepo,
 		eventOutboxRepo,
 		identityService,
+		providerFactory,
 	)
 
 	loanService := service.NewLoanApplicationService(

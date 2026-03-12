@@ -29,6 +29,14 @@ func (m *mockLoanAppRepo) GetByID(ctx context.Context, id uuid.UUID) (*entity.Lo
 	return args.Get(0).(*entity.LoanApplication), args.Error(1)
 }
 
+func (m *mockLoanAppRepo) GetByIDForUpdate(ctx context.Context, id uuid.UUID) (*entity.LoanApplication, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*entity.LoanApplication), args.Error(1)
+}
+
 func (m *mockLoanAppRepo) List(ctx context.Context, filter repository.ListFilter) ([]*entity.LoanApplication, error) {
 	args := m.Called(ctx, filter)
 	return args.Get(0).([]*entity.LoanApplication), args.Error(1)
@@ -41,6 +49,11 @@ func (m *mockLoanAppRepo) Update(ctx context.Context, app *entity.LoanApplicatio
 
 func (m *mockLoanAppRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status entity.LoanApplicationStatus) error {
 	args := m.Called(ctx, id, status)
+	return args.Error(0)
+}
+
+func (m *mockLoanAppRepo) UpdateBankInformation(ctx context.Context, id uuid.UUID, info entity.JSONB) error {
+	args := m.Called(ctx, id, info)
 	return args.Error(0)
 }
 
@@ -93,6 +106,11 @@ func (m *mockEventOutboxRepo) Create(ctx context.Context, event *entity.EventOut
 }
 
 func (m *mockEventOutboxRepo) GetPending(ctx context.Context, limit int) ([]*entity.EventOutbox, error) {
+	args := m.Called(ctx, limit)
+	return args.Get(0).([]*entity.EventOutbox), args.Error(1)
+}
+
+func (m *mockEventOutboxRepo) Claim(ctx context.Context, limit int) ([]*entity.EventOutbox, error) {
 	args := m.Called(ctx, limit)
 	return args.Get(0).([]*entity.EventOutbox), args.Error(1)
 }
@@ -570,5 +588,51 @@ func TestLoanApplicationService_CreateApplication_RoleComparison(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, borrowerUserID, app.UserID)
 		assert.NotEqual(t, adminUserID, app.UserID)
+	})
+}
+
+func TestLoanApplicationService_HandleBankWebhook_Idempotency(t *testing.T) {
+	loanRepo := new(mockLoanAppRepo)
+	countryRepo := new(mockCountryRepo)
+	bankRepo := new(mockBankProviderRepo)
+	eventRepo := new(mockEventOutboxRepo)
+	profileRepo := new(mockProfileRepo)
+	identityService := new(mockIdentityService)
+	uow := &mockUnitOfWork{loanRepo: loanRepo, eventRepo: eventRepo, profileRepo: profileRepo}
+
+	service := NewLoanApplicationService(uow, loanRepo, countryRepo, bankRepo, eventRepo, identityService, nil)
+
+	ctx := context.Background()
+	appID := uuid.New()
+
+	t.Run("Already processed (AnalyzingRisk)", func(t *testing.T) {
+		app := &entity.LoanApplication{
+			ID:     appID,
+			Status: entity.StatusAnalyzingRisk,
+		}
+
+		loanRepo.On("GetByIDForUpdate", ctx, appID).Return(app, nil).Once()
+
+		err := service.HandleBankWebhook(ctx, appID.String(), map[string]interface{}{"status": "success"})
+		assert.NoError(t, err)
+
+		// Ensure NO updates or event creation were called
+		loanRepo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
+		eventRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+	})
+
+	t.Run("Already processed (Approved)", func(t *testing.T) {
+		app := &entity.LoanApplication{
+			ID:     appID,
+			Status: entity.StatusApproved,
+		}
+
+		loanRepo.On("GetByIDForUpdate", ctx, appID).Return(app, nil).Once()
+
+		err := service.HandleBankWebhook(ctx, appID.String(), map[string]interface{}{"status": "success"})
+		assert.NoError(t, err)
+
+		loanRepo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
+		eventRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
 	})
 }

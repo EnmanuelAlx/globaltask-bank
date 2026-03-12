@@ -19,8 +19,42 @@ type ValidateRequest struct {
 
 func main() {
 	http.HandleFunc("/validate", handleValidate)
+	http.HandleFunc("/fetch-user-data", handleFetchUserData)
 	fmt.Println("Mock Bank service starting on :8081")
 	log.Fatal(http.ListenAndServe(":8081", nil))
+}
+
+func handleFetchUserData(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req ValidateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("Received user-data request for ApplicationID: %s, Borrower: %s", req.ApplicationID, req.BorrowerName)
+
+	// Portugal specific: return identity verification data
+	// If provider is Santander Totta or Millennium BCP
+	resp := map[string]interface{}{
+		"application_id":    req.ApplicationID,
+		"identity_document": req.IdentityDocument,
+		"borrower_name":     req.BorrowerName,
+		"address":           "Rua Augusta 123, Lisboa, Portugal",
+	}
+
+	// Simulation: If IdentityDocument is 11223344, return a fake name to fail verification
+	if req.IdentityDocument == "11223344" {
+		resp["borrower_name"] = "Fake borrower"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp)
 }
 
 func handleValidate(w http.ResponseWriter, r *http.Request) {
@@ -59,15 +93,14 @@ func handleValidate(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// If provider is Bancolombia, send a monthly income (simulating real bank data)
-		if provider == "Bancolombia" {
+		if provider == "Bancolombia" || provider == "Santander" {
 			// For testing the 200% rule:
 			// If amount is 1000, we send 400 (50% of 1000 is 500, so 400 is < 50% of amount, amount is > 200% of income -> Reject)
 			// Let's send a fixed income of 1,000,000 for CO tests
-			payload["monthly_income"] = 1000000.0
 			// Add total debt for the 3x income rule (Requirement: Income < 3x Debt = Reject)
 			// With 1M income, if debt is > 333,333 -> Reject
-			payload["total_debt"] = 250000.0
-			if req.IdentityDocument == "999999" {
+			payload["total_debt"] = 0
+			if req.IdentityDocument == "11223344" {
 				payload["total_debt"] = 500000.0 // 1M < 3 * 500k -> Reject
 			}
 		}

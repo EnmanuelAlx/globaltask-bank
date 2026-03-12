@@ -1,12 +1,9 @@
 package workflow
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"time"
 
@@ -35,13 +32,15 @@ type RiskRule struct {
 
 // WorkflowEngine orchestrates the async event processing
 type WorkflowEngine struct {
-	uow              repository.UnitOfWork
-	loanAppRepo      repository.LoanApplicationRepository
-	countryRepo      repository.CountryRepository
-	bankProviderRepo repository.BankProviderRepository
-	eventOutboxRepo  repository.EventOutboxRepository
-	identityService  entity.IdentityService
-	config           Config
+	uow                  repository.UnitOfWork
+	loanAppRepo          repository.LoanApplicationRepository
+	countryRepo          repository.CountryRepository
+	bankProviderRepo     repository.BankProviderRepository
+	workflowProviderRepo repository.WorkflowProviderRepository
+	eventOutboxRepo      repository.EventOutboxRepository
+	identityService      entity.IdentityService
+	providerFactory      ProviderFactory
+	config               Config
 }
 
 func NewWorkflowEngine(
@@ -49,16 +48,20 @@ func NewWorkflowEngine(
 	loanAppRepo repository.LoanApplicationRepository,
 	countryRepo repository.CountryRepository,
 	bankProviderRepo repository.BankProviderRepository,
+	workflowProviderRepo repository.WorkflowProviderRepository,
 	eventOutboxRepo repository.EventOutboxRepository,
 	identityService entity.IdentityService,
+	providerFactory ProviderFactory,
 ) *WorkflowEngine {
 	engine := &WorkflowEngine{
-		uow:              uow,
-		loanAppRepo:      loanAppRepo,
-		countryRepo:      countryRepo,
-		bankProviderRepo: bankProviderRepo,
-		eventOutboxRepo:  eventOutboxRepo,
-		identityService:  identityService,
+		uow:                  uow,
+		loanAppRepo:          loanAppRepo,
+		countryRepo:          countryRepo,
+		bankProviderRepo:     bankProviderRepo,
+		workflowProviderRepo: workflowProviderRepo,
+		eventOutboxRepo:      eventOutboxRepo,
+		identityService:      identityService,
+		providerFactory:      providerFactory,
 	}
 	engine.loadConfig()
 	return engine
@@ -89,7 +92,7 @@ func (e *WorkflowEngine) GetNextStep(countryCode string, currentEvent string) *s
 }
 
 // HandleLoanApplicationCreated processes the initial application event
-func (e *WorkflowEngine) HandleLoanApplicationCreated(ctx context.Context, event *entity.EventOutbox) error {
+func (e *WorkflowEngine) HandleLoanApplicationCreated(ctx context.Context, uow repository.UnitOfWork, event *entity.EventOutbox) error {
 	payload := event.Payload
 	log.Printf("Processing event %s with payload: %+v", event.ID, payload)
 
@@ -104,7 +107,7 @@ func (e *WorkflowEngine) HandleLoanApplicationCreated(ctx context.Context, event
 		return err
 	}
 
-	app, err := e.loanAppRepo.GetByID(ctx, appID)
+	app, err := uow.LoanApplications().GetByID(ctx, appID)
 	if err != nil {
 		return err
 	}
@@ -118,7 +121,7 @@ func (e *WorkflowEngine) HandleLoanApplicationCreated(ctx context.Context, event
 		return nil
 	}
 
-	profile, err := e.uow.Profiles().GetByID(ctx, app.UserID)
+	profile, err := uow.Profiles().GetByID(ctx, app.UserID)
 	if err != nil {
 		return err
 	}
@@ -151,33 +154,30 @@ func (e *WorkflowEngine) HandleLoanApplicationCreated(ctx context.Context, event
 			CreatedAt: time.Now(),
 		}
 
-		err = e.uow.Do(ctx, func(uow repository.UnitOfWork) error {
-			if err := uow.LoanApplications().UpdateStatus(ctx, appID, entity.StatusAwaitingBankData); err != nil {
-				return err
-			}
-			return uow.EventOutbox().Create(ctx, newEvent)
-		})
-		return err
+		if err := uow.LoanApplications().UpdateStatus(ctx, appID, entity.StatusAwaitingBankData); err != nil {
+			return err
+		}
+		return uow.EventOutbox().Create(ctx, newEvent)
 	}
 
 	return nil
 }
 
 // HandleFetchBankData processes bank data fetching
-func (e *WorkflowEngine) HandleFetchBankData(ctx context.Context, event *entity.EventOutbox) error {
+func (e *WorkflowEngine) HandleFetchBankData(ctx context.Context, uow repository.UnitOfWork, event *entity.EventOutbox) error {
 	log.Printf("Processing FetchBankData for event %s", event.ID)
 
 	payload := event.Payload
 	appIDStr, _ := payload["application_id"].(string)
 	appID, _ := uuid.Parse(appIDStr)
 
-	app, err := e.loanAppRepo.GetByID(ctx, appID)
+	app, err := uow.LoanApplications().GetByID(ctx, appID)
 	if err != nil || app == nil {
 		return ErrApplicationNotFound
 	}
 
 	// 1. Get user profile for identity info
-	profile, err := e.uow.Profiles().GetByID(ctx, app.UserID)
+	profile, err := uow.Profiles().GetByID(ctx, app.UserID)
 	if err != nil {
 		return err
 	}
@@ -185,67 +185,129 @@ func (e *WorkflowEngine) HandleFetchBankData(ctx context.Context, event *entity.
 		return fmt.Errorf("profile not found for user %s", app.UserID)
 	}
 
-	// 2. Get available bank providers for the country
-	providers, err := e.bankProviderRepo.GetByCountryID(ctx, profile.CountryID)
+	// 2. Get the country's ISO code
+	country, err := e.countryRepo.GetByID(ctx, profile.CountryID)
 	if err != nil {
 		return err
 	}
-	if len(providers) == 0 {
-		return fmt.Errorf("no bank providers found for country %d", profile.CountryID)
+	if country == nil {
+		return fmt.Errorf("country not found for ID %d", profile.CountryID)
 	}
 
-	// 3. Strategy: Select provider (Simple strategy: first one for now, could be based on amount/identity)
-	provider := providers[0]
-	mockBankURL := "http://mock-bank:8081/validate" // Default fallback
-
-	if url, ok := provider.APIConfig["url"].(string); ok {
-		mockBankURL = url
+	// 3. Query mapping table for providers
+	mappings, err := e.workflowProviderRepo.GetByWorkflowAndStep(ctx, country.ISOCode, string(entity.EventFetchBankData))
+	if err != nil {
+		return err
+	}
+	if len(mappings) == 0 {
+		return fmt.Errorf("no bank providers mapped for country %s and step %s", country.ISOCode, entity.EventFetchBankData)
 	}
 
-	log.Printf("Selected provider %s for application %s", provider.ProviderName, app.ID)
-
-	// 4. Call selected bank provider
+	// 4. Construct payload (same for all)
 	bankPayload := map[string]interface{}{
 		"application_id":    app.ID.String(),
 		"borrower_name":     profile.FullName,
 		"identity_document": profile.IdentityDocument,
 		"amount":            app.RequestedAmount,
-		"provider":          provider.ProviderName,
 	}
 
-	jsonData, err := json.Marshal(bankPayload)
-	if err != nil {
-		return err
+	// 5. Multi-provider execution (sequential with fallback)
+	var lastErr error
+	var succeeded bool
+	for i, mapping := range mappings {
+		provider, err := e.bankProviderRepo.GetByID(ctx, mapping.ProviderID)
+		if err != nil {
+			log.Printf("Error getting provider %d: %v", mapping.ProviderID, err)
+			lastErr = err
+			continue
+		}
+		if provider == nil {
+			log.Printf("Provider %d not found for mapping", mapping.ProviderID)
+			lastErr = fmt.Errorf("provider %d not found", mapping.ProviderID)
+			continue
+		}
+
+		client, err := e.providerFactory.GetClient(provider.ProviderName)
+		if err != nil {
+			log.Printf("Error getting client for provider %s: %v", provider.ProviderName, err)
+			lastErr = err
+			continue
+		}
+
+		log.Printf("Executing provider %s (Priority: %d) for application %s", provider.ProviderName, mapping.Priority, app.ID)
+
+		// Create a copy of the payload to add the provider name
+		payloadCopy := make(map[string]interface{})
+		for k, v := range bankPayload {
+			payloadCopy[k] = v
+		}
+		payloadCopy["provider"] = provider.ProviderName
+
+		resp, err := client.Execute(ctx, provider.BaseURL, mapping.EndpointPath, payloadCopy)
+		if err != nil {
+			log.Printf("Error calling provider %s: %v", provider.ProviderName, err)
+			if i < len(mappings)-1 {
+				nextProviderID := mappings[i+1].ProviderID
+				log.Printf("Fallback triggered for provider %s. Attempting next provider in sequence (ID: %d)", provider.ProviderName, nextProviderID)
+			}
+			lastErr = err
+			continue
+		}
+
+		if resp["status"] == "accepted" || resp["status"] == "processing" {
+			log.Printf("Provider %s returned '%s' status (asynchronous). Waiting for callback for application %s", provider.ProviderName, resp["status"], app.ID)
+			return nil
+		}
+
+		log.Printf("Successfully called provider %s (synchronous)", provider.ProviderName)
+
+		// Update app.BankInformation with response data
+		if app.BankInformation == nil {
+			app.BankInformation = make(entity.JSONB)
+		}
+		for k, v := range resp {
+			app.BankInformation[k] = v
+		}
+
+		// Save updated bank information to DB
+		if err := uow.LoanApplications().UpdateBankInformation(ctx, app.ID, app.BankInformation); err != nil {
+			log.Printf("Error saving updated bank information from provider %s: %v", provider.ProviderName, err)
+			lastErr = err
+			continue
+		}
+
+		succeeded = true
+		break
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, "POST", mockBankURL, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("Error calling mock-bank: %v", err)
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusAccepted {
-		return fmt.Errorf("mock-bank returned status %d", resp.StatusCode)
+	if !succeeded {
+		return fmt.Errorf("all providers for FetchBankData failed for app %s. Last error: %v", app.ID, lastErr)
 	}
 
-	return nil
+	// Dynamic Next Step
+	nextStep := e.GetNextStep(country.ISOCode, string(entity.EventFetchBankData))
+	if nextStep == nil {
+		return nil
+	}
+
+	newEvent := &entity.EventOutbox{
+		ID:        uuid.New(),
+		EventType: entity.EventType(*nextStep),
+		Payload:   entity.JSONB{"application_id": app.ID.String()},
+		Status:    entity.EventStatusPending,
+		CreatedAt: time.Now(),
+	}
+
+	return uow.EventOutbox().Create(ctx, newEvent)
 }
 
 // HandleValidateUserIdentity processes identity verification
-func (e *WorkflowEngine) HandleValidateUserIdentity(ctx context.Context, event *entity.EventOutbox) error {
+func (e *WorkflowEngine) HandleValidateUserIdentity(ctx context.Context, uow repository.UnitOfWork, event *entity.EventOutbox) error {
 	payload := event.Payload
 	appIDStr, _ := payload["application_id"].(string)
 	appID, _ := uuid.Parse(appIDStr)
 
-	app, err := e.loanAppRepo.GetByID(ctx, appID)
+	app, err := uow.LoanApplications().GetByID(ctx, appID)
 	if err != nil || app == nil {
 		return ErrApplicationNotFound
 	}
@@ -257,12 +319,91 @@ func (e *WorkflowEngine) HandleValidateUserIdentity(ctx context.Context, event *
 	}
 
 	// Get user profile for identity verification
-	profile, err := e.uow.Profiles().GetByID(ctx, app.UserID)
+	profile, err := uow.Profiles().GetByID(ctx, app.UserID)
 	if err != nil {
 		return err
 	}
 	if profile == nil {
 		return fmt.Errorf("profile not found for user %s", app.UserID)
+	}
+
+	// 1. Get the country's ISO code
+	country, err := e.countryRepo.GetByID(ctx, profile.CountryID)
+	if err != nil {
+		return err
+	}
+	if country == nil {
+		return fmt.Errorf("country not found for ID %d", profile.CountryID)
+	}
+
+	// 2. Query mapping table for providers for this step
+	mappings, err := e.workflowProviderRepo.GetByWorkflowAndStep(ctx, country.ISOCode, string(entity.EventValidateUserIdentity))
+	if err != nil {
+		log.Printf("Warning: error querying providers for ValidateUserIdentity: %v", err)
+	}
+
+	// 3. If we have mappings, call providers to fetch fresh data (sequential with fallback)
+	var succeeded bool
+	if len(mappings) > 0 {
+		log.Printf("Calling up to %d providers for identity validation for app %s", len(mappings), app.ID)
+
+		bankPayload := map[string]interface{}{
+			"application_id":    app.ID.String(),
+			"borrower_name":     profile.FullName,
+			"identity_document": profile.IdentityDocument,
+		}
+
+		for i, mapping := range mappings {
+			provider, err := e.bankProviderRepo.GetByID(ctx, mapping.ProviderID)
+			if err != nil || provider == nil {
+				log.Printf("Error getting provider %d: %v", mapping.ProviderID, err)
+				continue
+			}
+
+			client, err := e.providerFactory.GetClient(provider.ProviderName)
+			if err != nil {
+				log.Printf("Error getting client for provider %s: %v", provider.ProviderName, err)
+				continue
+			}
+
+			log.Printf("Executing provider %s (Priority: %d) for identity validation for app %s", provider.ProviderName, mapping.Priority, app.ID)
+
+			resp, err := client.Execute(ctx, provider.BaseURL, mapping.EndpointPath, bankPayload)
+			if err != nil {
+				log.Printf("Error fetching user data from provider %s: %v", provider.ProviderName, err)
+				if i < len(mappings)-1 {
+					nextProviderID := mappings[i+1].ProviderID
+					log.Printf("Fallback triggered for provider %s. Attempting next provider in sequence (ID: %d)", provider.ProviderName, nextProviderID)
+				}
+				continue
+			}
+
+			if resp["status"] == "accepted" {
+				log.Printf("Provider %s returned 'accepted' status for identity validation (asynchronous). Waiting for callback for application %s", provider.ProviderName, app.ID)
+				return nil
+			}
+
+			log.Printf("Successfully called provider %s for identity validation (synchronous)", provider.ProviderName)
+
+			// Update app.BankInformation with response data for validation
+			if app.BankInformation == nil {
+				app.BankInformation = make(entity.JSONB)
+			}
+			for k, v := range resp {
+				app.BankInformation[k] = v
+			}
+
+			// Save updated bank information to DB
+			if err := uow.LoanApplications().UpdateBankInformation(ctx, app.ID, app.BankInformation); err != nil {
+				log.Printf("Error saving updated bank information from provider %s: %v", provider.ProviderName, err)
+			}
+			succeeded = true
+			break
+		}
+	}
+
+	if len(mappings) > 0 && !succeeded {
+		return fmt.Errorf("all providers for ValidateUserIdentity failed for app %s", app.ID)
 	}
 
 	bankID, _ := app.BankInformation["identity_document"].(string)
@@ -280,7 +421,7 @@ func (e *WorkflowEngine) HandleValidateUserIdentity(ctx context.Context, event *
 	}
 
 	if !isValid {
-		return e.loanAppRepo.UpdateStatus(ctx, appID, entity.StatusRejected)
+		return uow.LoanApplications().UpdateStatus(ctx, appID, entity.StatusRejected)
 	}
 
 	// Dynamic Next Step
@@ -298,11 +439,11 @@ func (e *WorkflowEngine) HandleValidateUserIdentity(ctx context.Context, event *
 		CreatedAt: time.Now(),
 	}
 
-	return e.eventOutboxRepo.Create(ctx, newEvent)
+	return uow.EventOutbox().Create(ctx, newEvent)
 }
 
 // HandleEvaluateRisk processes the risk evaluation
-func (e *WorkflowEngine) HandleEvaluateRisk(ctx context.Context, event *entity.EventOutbox) error {
+func (e *WorkflowEngine) HandleEvaluateRisk(ctx context.Context, uow repository.UnitOfWork, event *entity.EventOutbox) error {
 	payload := event.Payload
 
 	appIDStr, ok := payload["application_id"].(string)
@@ -315,7 +456,7 @@ func (e *WorkflowEngine) HandleEvaluateRisk(ctx context.Context, event *entity.E
 		return err
 	}
 
-	app, err := e.loanAppRepo.GetByID(ctx, appID)
+	app, err := uow.LoanApplications().GetByID(ctx, appID)
 	if err != nil {
 		return err
 	}
@@ -323,7 +464,7 @@ func (e *WorkflowEngine) HandleEvaluateRisk(ctx context.Context, event *entity.E
 		return ErrApplicationNotFound
 	}
 
-	profile, err := e.uow.Profiles().GetByID(ctx, app.UserID)
+	profile, err := uow.Profiles().GetByID(ctx, app.UserID)
 	if err != nil {
 		return err
 	}
@@ -348,9 +489,9 @@ func (e *WorkflowEngine) HandleEvaluateRisk(ctx context.Context, event *entity.E
 	approved := e.applyRules(app, rules)
 
 	if approved {
-		err = e.loanAppRepo.UpdateStatus(ctx, appID, entity.StatusApproved)
+		err = uow.LoanApplications().UpdateStatus(ctx, appID, entity.StatusApproved)
 	} else {
-		err = e.loanAppRepo.UpdateStatus(ctx, appID, entity.StatusRejected)
+		err = uow.LoanApplications().UpdateStatus(ctx, appID, entity.StatusRejected)
 	}
 	return err
 }

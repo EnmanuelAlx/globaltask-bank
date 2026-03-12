@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -12,23 +13,23 @@ import (
 )
 
 type WorkerPool struct {
-	eventOutboxRepo repository.EventOutboxRepository
-	workflowEngine  *workflow.WorkflowEngine
-	concurrency     int
-	stopCh          chan struct{}
-	wg              sync.WaitGroup
+	uowManager     repository.UnitOfWork
+	workflowEngine *workflow.WorkflowEngine
+	concurrency    int
+	stopCh         chan struct{}
+	wg             sync.WaitGroup
 }
 
 func NewWorkerPool(
-	eventOutboxRepo repository.EventOutboxRepository,
+	uowManager repository.UnitOfWork,
 	workflowEngine *workflow.WorkflowEngine,
 	concurrency int,
 ) *WorkerPool {
 	return &WorkerPool{
-		eventOutboxRepo: eventOutboxRepo,
-		workflowEngine:  workflowEngine,
-		concurrency:     concurrency,
-		stopCh:          make(chan struct{}),
+		uowManager:     uowManager,
+		workflowEngine: workflowEngine,
+		concurrency:    concurrency,
+		stopCh:         make(chan struct{}),
 	}
 }
 
@@ -68,55 +69,44 @@ func (wp *WorkerPool) worker(ctx context.Context, id int) {
 }
 
 func (wp *WorkerPool) processOne(ctx context.Context, workerID int) error {
-	// Get pending events with SKIP LOCKED
-	events, err := wp.eventOutboxRepo.GetPending(ctx, 1)
-	if err != nil {
-		return err
-	}
+	return wp.uowManager.Do(ctx, func(uow repository.UnitOfWork) error {
+		// a. Claim one event atomically
+		events, err := uow.EventOutbox().Claim(ctx, 1)
+		if err != nil {
+			return err
+		}
 
-	if len(events) == 0 {
-		return nil // No work to do
-	}
+		// b. If no events, return nil to end transaction early
+		if len(events) == 0 {
+			return nil
+		}
 
-	event := events[0]
+		event := events[0]
 
-	// Lock the event
-	locked, err := wp.eventOutboxRepo.Lock(ctx, event.ID)
-	if err != nil {
-		return err
-	}
-	if !locked {
-		return nil // Another worker got it
-	}
+		// c. Log worker ID and event processing start
+		log.Printf("Worker %d processing event %s (type: %s)", workerID, event.ID, event.EventType)
 
-	// Process based on event type
-	log.Printf("Worker %d processing event %s (type: %s)", workerID, event.ID, event.EventType)
+		// d. Pass 'uow' into handlers
+		switch event.EventType {
+		case entity.EventLoanApplicationCreated:
+			err = wp.workflowEngine.HandleLoanApplicationCreated(ctx, uow, event)
+		case entity.EventFetchBankData:
+			err = wp.workflowEngine.HandleFetchBankData(ctx, uow, event)
+		case entity.EventValidateUserIdentity:
+			err = wp.workflowEngine.HandleValidateUserIdentity(ctx, uow, event)
+		case entity.EventEvaluateApplicationRisk:
+			err = wp.workflowEngine.HandleEvaluateRisk(ctx, uow, event)
+		default:
+			log.Printf("Unknown event type: %s", event.EventType)
+			return fmt.Errorf("unknown event type: %s", event.EventType)
+		}
 
-	switch event.EventType {
-	case entity.EventLoanApplicationCreated:
-		err = wp.workflowEngine.HandleLoanApplicationCreated(ctx, event)
-	case entity.EventFetchBankData:
-		err = wp.workflowEngine.HandleFetchBankData(ctx, event)
-	case entity.EventValidateUserIdentity:
-		err = wp.workflowEngine.HandleValidateUserIdentity(ctx, event)
-	case entity.EventEvaluateApplicationRisk:
-		err = wp.workflowEngine.HandleEvaluateRisk(ctx, event)
-	default:
-		log.Printf("Unknown event type: %s", event.EventType)
-		err = wp.eventOutboxRepo.MarkFailed(ctx, event.ID, "unknown event type")
-	}
+		if err != nil {
+			// e. Return error for rollback
+			return err
+		}
 
-	if err != nil {
-		log.Printf("Worker %d failed to process event %s: %v", workerID, event.ID, err)
-		wp.eventOutboxRepo.MarkFailed(ctx, event.ID, err.Error())
-		return err
-	}
-
-	// Mark as done
-	if err := wp.eventOutboxRepo.MarkDone(ctx, event.ID); err != nil {
-		return err
-	}
-
-	log.Printf("Worker %d completed event %s", workerID, event.ID)
-	return nil
+		// f. Mark as done
+		return uow.EventOutbox().MarkDone(ctx, event.ID)
+	})
 }
