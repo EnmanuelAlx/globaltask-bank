@@ -37,4 +37,7 @@ create-user: ## Create a developer user via Supabase Admin API (Usage: make crea
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
+scale-test: ## Run scale test
+	docker compose run --rm -u "$$(id -u):$$(id -g)" k6 run /scripts/scale-test.js --out json=/scripts/results.json
+
 .DEFAULT_GOAL := help

@@ -101,6 +101,29 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
+  # ==========================================
+  # K6 - Stress Testing
+  # ==========================================
+  k6:
+    image: grafana/k6:latest
+    container_name: globaltask-k6
+    working_dir: /scripts
+    volumes:
+      - ./k6:/scripts
+    environment:
+      - ADMIN_EMAIL=admin@globaltask.com
+      - ADMIN_PASSWORD=password123
+      - SUPABASE_URL=http://host.docker.internal:54321
+      - API_URL=http://host.docker.internal
+    networks:
+      - globaltask-network
+      - supabase-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Descomenta para ejecutar automáticamente al iniciar
+    # command: run /scripts/stress-test.js
+    restart: "no"
+
 networks:
   globaltask-network:
     driver: bridge
