@@ -2,7 +2,7 @@
 # Development & Setup
 # ==========================================
 
-.PHONY: init up down restart logs ps tests create-user
+.PHONY: init up down restart logs ps test create-user
 
 init: ## Step 1: Initialize Supabase, migrations and create user
 	@./scripts/init-project.sh
@@ -16,6 +16,9 @@ down: ## Restart all services
 
 logs: ## Show logs
 	docker-compose logs -f
+
+test: ## Run API tests
+	docker compose exec api go test ./... -v
 
 create-user: ## Create a developer user via Supabase Admin API (Usage: make create-user EMAIL=user@example.com PASS=password123)
 	@if [ -z "$(EMAIL)" ] || [ -z "$(PASS)" ]; then \

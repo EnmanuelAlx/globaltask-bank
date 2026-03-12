@@ -42,6 +42,11 @@ func main() {
 	// ==========================================
 	// 2.5 Security / Crypto
 	// ==========================================
+	if err := middleware.InitJWKS(); err != nil {
+		log.Fatalf("Failed to initialize JWKS: %v", err)
+	}
+	log.Println("✅ JWKS initialized")
+
 	encryptor, err := security.NewAESEncryptor()
 
 	// ==========================================

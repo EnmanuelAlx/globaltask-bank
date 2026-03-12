@@ -15,38 +15,40 @@ import (
 	"github.com/google/uuid"
 )
 
-type JWTAuthConfig struct {
-	JWKSURL   string
-	JWTSecret string
-}
-
 var (
-	jwtConfig JWTAuthConfig
-	kf        keyfunc.Keyfunc
-	initOnce  sync.Once
+	kf       keyfunc.Keyfunc
+	issuer   string
+	initOnce sync.Once
+	initErr  error
 )
 
-func SetJWTSecret(secret string) {
-	jwtConfig.JWTSecret = secret
-}
-
-func InitJWKS() {
+// InitJWKS initializes the JWKS keyfunc from SUPABASE_JWKS_URL.
+// It must be called once at application startup. Returns an error if
+// the required environment variables are missing or JWKS fetch fails.
+func InitJWKS() error {
 	initOnce.Do(func() {
 		jwksURL := os.Getenv("SUPABASE_JWKS_URL")
 		if jwksURL == "" {
-			jwksURL = jwtConfig.JWKSURL
-		}
-		if jwksURL == "" {
-			log.Println("SUPABASE_JWKS_URL not set, falling back to HS256 if secret is provided")
+			initErr = fmt.Errorf("SUPABASE_JWKS_URL environment variable is required")
 			return
 		}
 
-		var err error
-		kf, err = keyfunc.NewDefault([]string{jwksURL})
-		if err != nil {
-			log.Printf("Failed to create keyfunc from JWKS URL: %v", err)
+		supabaseURL := os.Getenv("SUPABASE_URL")
+		if supabaseURL == "http://host.docker.internal:54321" {
+			supabaseURL = "http://127.0.0.1:54321"
+		}
+		if supabaseURL == "" {
+			initErr = fmt.Errorf("SUPABASE_URL environment variable is required")
+			return
+		}
+		issuer = strings.TrimSuffix(supabaseURL, "/") + "/auth/v1"
+
+		kf, initErr = keyfunc.NewDefault([]string{jwksURL})
+		if initErr != nil {
+			initErr = fmt.Errorf("failed to fetch JWKS from %s: %w", jwksURL, initErr)
 		}
 	})
+	return initErr
 }
 
 // JWTAuth middleware validates JWT tokens from Supabase and fetches the user's role from their profile.
@@ -59,7 +61,6 @@ func JWTAuth(profileRepo repository.ProfileRepository) gin.HandlerFunc {
 			return
 		}
 
-		// Extract token from "Bearer <token>"
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization header format"})
@@ -69,46 +70,40 @@ func JWTAuth(profileRepo repository.ProfileRepository) gin.HandlerFunc {
 
 		tokenString := parts[1]
 
-		// Parse and validate token
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			// Try RS256 or ES256 with JWKS first
-			if _, ok := token.Method.(*jwt.SigningMethodRSA); ok || strings.HasPrefix(token.Method.Alg(), "ES") || strings.HasPrefix(token.Method.Alg(), "RS") {
-				if kf == nil {
-					InitJWKS()
-				}
-				if kf != nil {
-					key, err := kf.Keyfunc(token)
-					if err != nil {
-						log.Printf("Keyfunc failed for alg %v: %v", token.Method.Alg(), err)
-					}
-					return key, err
-				}
-			}
-
-			// Fallback to HS256
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				log.Printf("Invalid signing method: %v", token.Header["alg"])
-				return nil, jwt.ErrSignatureInvalid
-			}
-			// Use JWT_SECRET or fall back to config
-			secret := jwtConfig.JWTSecret
-			if secret == "" {
-				secret = os.Getenv("JWT_SECRET")
-			}
-			if secret == "" {
-				secret = "default-secret-change-me"
-			}
-			return []byte(secret), nil
-		})
-
-		if err != nil || !token.Valid {
-			log.Printf("JWT validation failed: %v", err)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": err.Error()})
+		if kf == nil {
+			log.Println("JWKS not initialized, rejecting request")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "authentication service unavailable"})
 			c.Abort()
 			return
 		}
 
-		// Extract claims
+		// Parse and validate token with strict options:
+		// - Only asymmetric algorithms allowed (RS256, ES256)
+		// - Issuer must match our Supabase project
+		// - Audience must be "authenticated"
+		// - Expiration is validated by default
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			// Verify it's an asymmetric algorithm (RSA or ECDSA)
+			switch token.Method.(type) {
+			case *jwt.SigningMethodRSA, *jwt.SigningMethodECDSA:
+				return kf.Keyfunc(token)
+			default:
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+		},
+			jwt.WithIssuer(issuer),
+			jwt.WithAudience("authenticated"),
+			jwt.WithExpirationRequired(),
+			jwt.WithValidMethods([]string{"RS256", "ES256"}),
+		)
+
+		if err != nil || !token.Valid {
+			log.Printf("JWT validation failed: %v", err)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			c.Abort()
+			return
+		}
+
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token claims"})
@@ -116,7 +111,6 @@ func JWTAuth(profileRepo repository.ProfileRepository) gin.HandlerFunc {
 			return
 		}
 
-		// Get user ID from claims
 		sub, ok := claims["sub"].(string)
 		if !ok || sub == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing subject in token"})
@@ -131,12 +125,9 @@ func JWTAuth(profileRepo repository.ProfileRepository) gin.HandlerFunc {
 			return
 		}
 
-		// Set userID first so it can be used by GetUserID if needed
 		c.Set("user_id", userID)
 
-		// Get role from profile table instead of relying only on claims
 		role := "USER"
-		fmt.Println("User id", userID)
 		if profileRepo != nil {
 			profile, err := profileRepo.GetByID(c.Request.Context(), userID)
 			if err == nil && profile != nil {
@@ -144,15 +135,9 @@ func JWTAuth(profileRepo repository.ProfileRepository) gin.HandlerFunc {
 			} else if err != nil {
 				log.Printf("Failed to fetch profile for user %s: %v", userID, err)
 			}
-		} else {
-			// Fallback to claims if no profile repository provided
-			if roleClaim, ok := claims["role"].(string); ok {
-				role = roleClaim
-			}
 		}
 
 		c.Set("user_role", role)
-
 		c.Next()
 	}
 }
