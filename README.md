@@ -1,41 +1,41 @@
-# 🏦 GlobalTask Bank - Sistema de Gestión de Crédito
+# 🏦 GlobalTask Bank - Credit Management System
 
 [![Go Version](https://img.shields.io/badge/Go-1.22-blue)](https://go.dev/)
 [![Vue.js 3](https://img.shields.io/badge/Vue.js-3-%234FC08D)](https://vuejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Supabase-336791)](https://supabase.com/)
 
-> Sistema de backend y frontend diseñado para gestionar solicitudes de crédito a escala global. Construido sobre una arquitectura limpia (**Clean Architecture**) y diseño orientado al dominio (**DDD**), el sistema soporta flujos de trabajo asíncronos distribuidos, procesamiento concurrente y actualizaciones en tiempo real mediante **WebSockets**.
+> Backend and frontend system designed to manage credit applications at global scale. Built on **Clean Architecture** and **Domain-Driven Design (DDD)**, the system supports distributed asynchronous workflows, concurrent processing, and real-time updates via **WebSockets**.
 
 ---
 
-## 🚀 ¿Por qué Go?
+## 🚀 Why Go?
 
-A pesar de no tener experiencia previa significativa con Go, elegí este lenguaje por sus **beneficios fundamentales**:
+Despite having no significant prior experience with Go, I chose this language for its **fundamental benefits**:
 
-- **Concurrencia nativa**: Las **Goroutines** permiten manejar miles de solicitudes simultáneas con mínimo overhead de memoria.
-- **Velocidad**: El rendimiento nativo de Go es ideal para procesar múltiples créditos en paralelo.
-- **WebSockets + Worker**: La capacidad de crear un websocket y un worker en de manera sencilla gracias a las go routines
+- **Native concurrency**: **Goroutines** allow handling thousands of simultaneous requests with minimal memory overhead.
+- **Speed**: Go's native performance is ideal for processing multiple credit applications in parallel.
+- **WebSockets + Worker**: The ability to create a websocket and worker easily thanks to goroutines
 
-> El código fue casi en su totalidad generado con agentes de IA, específicamente usando [OpenCode](https://opencode.ai/) y el modelo **Gemini 3.0 Flash**, siguiendo la metodología de desarrollo **Spec-Driven Development (SDD)**.
-
----
-
-## 📋 Metodología de Desarrollo
-
-Este proyecto fue desarrollado utilizando **[OpenSpec](https://openspec.dev/)** (Spec-Driven Development):
-
-1. **Exploración** → Investigación del codebase y contexto técnico
-2. **Propuesta** → Análisis de impacto y plan de rollback
-3. **Specs** → Especificaciones formales usando Given/When/Then
-4. **Diseño** → Arquitectura técnica, data flow y contratos
-5. **Tareas** → Desglose en tareas implementables
-6. **Implementación** → Código siguiendo specs y diseño
-7. **Verificación** → Validación contra especificaciones
-8. **Archivo** → Documentación final
+> The code was almost entirely generated with AI agents, specifically using [OpenCode](https://opencode.ai/) and the **Gemini 3.0 Flash** model, following the **Spec-Driven Development (SDD)** methodology.
 
 ---
 
-## 🏗️ Arquitectura del Sistema
+## 📋 Development Methodology
+
+This project was developed using **[OpenSpec](https://openspec.dev/)** (Spec-Driven Development):
+
+1. **Exploration** → Codebase investigation and technical context
+2. **Proposal** → Impact analysis and rollback plan
+3. **Specs** → Formal specifications using Given/When/Then
+4. **Design** → Technical architecture, data flow and contracts
+5. **Tasks** → Breakdown into actionable tasks
+6. **Implementation** → Code following specs and design
+7. **Verification** → Validation against specifications
+8. **Archive** → Final documentation
+
+---
+
+## 🏗️ System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -66,28 +66,28 @@ Este proyecto fue desarrollado utilizando **[OpenSpec](https://openspec.dev/)** 
                     └────────────────────────┘
 ```
 
-### Componentes
+### Components
 
-| Componente | Tecnología | Descripción |
+| Component | Technology | Description |
 |------------|------------|-------------|
-| **Frontend** | Vue 3 + Vite | Dashboard interactivo para gestión de créditos |
-| **API** | Go + Gin | REST API con validación JWT y WebSockets |
-| **Worker** | Go | Procesador de eventos asíncronos |
-| **Mock Bank** | Go | Simulador de proveedor bancario externo |
-| **K6** | Grafana k6 | Pruebas de carga y stress testing |
-| **Nginx** | Nginx | Balanceador de cargas y reverse proxy |
-| **Base de Datos** | PostgreSQL (Supabase) | Persistencia + Message Broker |
+| **Frontend** | Vue 3 + Vite | Interactive dashboard for credit management |
+| **API** | Go + Gin | REST API with JWT validation and WebSockets |
+| **Worker** | Go | Asynchronous event processor |
+| **Mock Bank** | Go | External bank provider simulator |
+| **K6** | Grafana k6 | Load testing and stress testing |
+| **Nginx** | Nginx | Load balancer and reverse proxy |
+| **Database** | PostgreSQL (Supabase) | Persistence + Message Broker |
 
 ---
 
-## 🗄️ Modelo de Datos
+## 🗄️ Data Model
 
-### Diagrama Entidad-Relación
+### Entity-Relationship Diagram
 
 ```dbml
 // GlobalTask Bank - Database Schema
 
-// Tabla de países soportados
+// Supported countries table
 Table countries as c {
   id serial [pk]
   iso_code varchar(3) [not null, unique]
@@ -95,18 +95,18 @@ Table countries as c {
   currency varchar(10) [not null]
 }
 
-// Perfiles de usuarios (sincronizado desde Supabase Auth)
+// User profiles (synchronized from Supabase Auth)
 Table profiles as p {
   id uuid [pk]
   full_name varchar(255)
-  identity_document text [note: 'Almacena el documento cifrado (AES-256-GCM)']
-  identity_document_bidx text [note: 'Blind index para búsquedas seguras']
+  identity_document text [note: 'Stores encrypted document (AES-256-GCM)']
+  identity_document_bidx text [note: 'Blind index for secure searches']
   country_id int [ref: > c.id]
-  role varchar(50) [not null, default: 'USER', note: 'ADMIN o USER']
+  role varchar(50) [not null, default: 'USER', note: 'ADMIN or USER']
   created_at timestamptz
 }
 
-// Proveedores bancarios por país
+// Bank providers by country
 Table bank_providers as bp {
   id serial [pk]
   country_id int [not null, ref: > c.id]
@@ -116,7 +116,7 @@ Table bank_providers as bp {
   created_at timestamptz
 }
 
-// Solicitudes de crédito
+// Credit applications
 Table loan_applications as la {
   id uuid [pk, default: 'uuid_generate_v4()']
   user_id uuid [not null, ref: > p.id]
@@ -129,7 +129,7 @@ Table loan_applications as la {
   updated_at timestamptz
 }
 
-// Cola de eventos (Event Outbox Pattern)
+// Event queue (Event Outbox Pattern)
 Table event_outbox as eo {
   id uuid [pk, default: 'uuid_generate_v4()']
   event_type varchar(100) [not null]
@@ -139,20 +139,20 @@ Table event_outbox as eo {
   locked_at timestamptz
 }
 
-// Mapeo de workflows a proveedores
+// Workflow to provider mapping
 Table workflow_providers as wp {
   id uuid [pk, default: 'uuid_generate_v4()']
-  workflow_name varchar(10) [not null, note: 'Código de país: PT, CO, MX, etc.']
+  workflow_name varchar(10) [not null, note: 'Country code: PT, CO, MX, etc.']
   provider_id int [not null, ref: > bp.id]
   event_step varchar(100) [not null, note: 'FETCH_BANK_DATA, VALIDATE_USER_IDENTITY, etc.']
   endpoint_path varchar(255) [not null]
-  priority int [not null, default: 0, note: 'Menor número = mayor prioridad']
+  priority int [not null, default: 0, note: 'Lower number = higher priority']
   is_active boolean [default: true]
   created_at timestamptz
   updated_at timestamptz
 }
 
-// Índices
+// Indexes
 Index idx_loan_applications_user_id on la(user_id)
 Index idx_loan_applications_status on la(status)
 Index idx_event_outbox_status on eo(status) where status = 'PENDING'
@@ -162,129 +162,129 @@ Index idx_profiles_identity_document_bidx on p(identity_document_bidx)
 
 ---
 
-## 🔧 Triggers y Funcionalidades
+## 🔧 Triggers and Functionality
 
-### 1. `handle_new_user()` - Sincronización de Usuarios
+### 1. `handle_new_user()` - User Synchronization
 
 ```sql
 -- Trigger: on_auth_user_created
--- Evento: AFTER INSERT ON auth.users
+-- Event: AFTER INSERT ON auth.users
 ```
 
-**Propósito**: Automatiza la creación de perfiles cuando un usuario se registra en Supabase Auth.
+**Purpose**: Automates the creation of profiles when a user registers in Supabase Auth.
 
-**Flujo**:
-1. Usuario se registra en Supabase (vía frontend o Admin API)
-2. Trigger `on_auth_user_created` ejecuta `handle_new_user()`
-3. Se crea un registro en `public.profiles` con los metadatos del usuario
-4. El rol se determina por el email:
-   - Emails con `@globaltask` → **ADMIN**
-   - Otros emails → **USER**
+**Flow**:
+1. User registers in Supabase (via frontend or Admin API)
+2. Trigger `on_auth_user_created` executes `handle_new_user()`
+3. A record is created in `public.profiles` with the user's metadata
+4. The role is determined by the email:
+   - Emails with `@globaltask` → **ADMIN**
+   - Other emails → **USER**
 
-**Nota de seguridad**: El patrón de email no es seguro para producción, pero se implementó por practicidad en desarrollo.
+**Security note**: The email pattern is not secure for production, but was implemented for development convenience.
 
 ---
 
-### 2. `notify_loan_application_update()` - Notificaciones en Tiempo Real
+### 2. `notify_loan_application_update()` - Real-Time Notifications
 
 ```sql
 -- Trigger: on_loan_application_update
--- Evento: AFTER INSERT OR UPDATE ON public.loan_applications
+-- Event: AFTER INSERT OR UPDATE ON public.loan_applications
 ```
 
-**Propósito**: Notifica a los clientes via WebSocket cuando el estado de su solicitud cambia.
+**Purpose**: Notifies clients via WebSocket when their application status changes.
 
-**Flujo**:
-1. Worker procesa un evento y actualiza el estado del crédito
-2. Trigger envía notificación a través de `pg_notify('loan_application_updates', ...)`
-3. API recibe la notificación y transmite a clientes conectados vía WebSocket
-4. Frontend actualiza la UI en tiempo real
+**Flow**:
+1. Worker processes an event and updates the credit status
+2. Trigger sends notification via `pg_notify('loan_application_updates', ...)`
+3. API receives the notification and transmits to connected clients via WebSocket
+4. Frontend updates the UI in real-time
 
 ---
 
-### 3. `update_updated_at_column()` - Auto-actualización de Timestamps
+### 3. `update_updated_at_column()` - Auto-update Timestamps
 
 ```sql
 -- Trigger: update_loan_applications_updated_at
 -- Trigger: update_workflow_providers_updated_at
--- Evento: BEFORE UPDATE ON [tabla]
+-- Event: BEFORE UPDATE ON [table]
 ```
 
-**Propósito**: Mantiene automáticamente la columna `updated_at` con la fecha/hora actual en cada actualización.
+**Purpose**: Automatically maintains the `updated_at` column with the current date/time on each update.
 
 ---
 
-### 4. Políticas de Seguridad (RLS - Row Level Security)
+### 4. Security Policies (RLS - Row Level Security)
 
-| Tabla | Política | Condición |
+| Table | Policy | Condition |
 |-------|----------|-----------|
-| `loan_applications` | ADMIN: gestionar todos | `is_admin() = true` |
-| `loan_applications` | USER: ver propios | `user_id = auth.uid()` |
-| `profiles` | ADMIN: gestionar todos | `is_admin() = true` |
-| `profiles` | USER: ver propio | `id = auth.uid()` |
-| `countries` | Authenticated: listar | `true` |
-| `bank_providers` | ADMIN: gestionar todos | `is_admin() = true` |
-| `workflow_providers` | ADMIN: gestionar todos | `is_admin() = true` |
-| `event_outbox` | ADMIN: gestionar todos | `is_admin() = true` |
+| `loan_applications` | ADMIN: manage all | `is_admin() = true` |
+| `loan_applications` | USER: view own | `user_id = auth.uid()` |
+| `profiles` | ADMIN: manage all | `is_admin() = true` |
+| `profiles` | USER: view own | `id = auth.uid()` |
+| `countries` | Authenticated: list | `true` |
+| `bank_providers` | ADMIN: manage all | `is_admin() = true` |
+| `workflow_providers` | ADMIN: manage all | `is_admin() = true` |
+| `event_outbox` | ADMIN: manage all | `is_admin() = true` |
 
 ---
 
-## 📦 Instalación y Ejecución
+## 📦 Installation and Execution
 
-### Requisitos Previos
+### Prerequisites
 
-- **Docker** y **Docker Compose** instalados
-- **Git** para clonar el repositorio
-- **Supabase CLI** instalado globalmente - si no lo tienes, `make init` lo instala automáticamente
-- **npm** para instalar supabase cli
+- **Docker** and **Docker Compose** installed
+- **Git** to clone the repository
+- **Supabase CLI** installed globally - if you don't have it, `make init` installs it automatically
+- **npm** to install supabase CLI
 
-### Pasos de Instalación
+### Installation Steps
 
 ```bash
-# 1. Clonar el repositorio
+# 1. Clone the repository
 git clone <repo-url>
 cd globaltask-bank
 
-# 2. Inicializar Supabase (instala CLI si no existe y genera keys)
+# 2. Initialize Supabase (installs CLI if not exists and generates keys)
 make init
 
-# 3. Copiar y configurar variables de entorno
+# 3. Copy and configure environment variables
 cp .env.example .env
-# ⚠️ Edita el archivo .env con las keys generadas en el paso anterior
+# ⚠️ Edit the .env file with the keys generated in the previous step
 
-# 4. Levantar el proyecto
+# 4. Start the project
 make up
 ```
 
-### Servicios Disponibles
+### Available Services
 
-| Servicio | URL | Descripción |
+| Service | URL | Description |
 |----------|-----|-------------|
-| **Frontend** | [http://localhost](http://localhost) | Dashboard de gestión |
+| **Frontend** | [http://localhost](http://localhost) | Management dashboard |
 | **API** | [http://localhost/health](http://localhost/health) | Health check |
-| **WebSocket** | `ws://localhost/api/v1/ws` | Endpoint de WebSockets |
-| **Mock Bank** | [http://localhost:8081](http://localhost:8081) | Simulador bancario |
+| **WebSocket** | `ws://localhost/api/v1/ws` | WebSockets endpoint |
+| **Mock Bank** | [http://localhost:8081](http://localhost:8081) | Bank simulator |
 
 ---
 
-## ⚙️ Variables de Entorno
+## ⚙️ Environment Variables
 
 ```bash
 # ==========================================
 # Supabase Configuration (LOCAL)
 # ==========================================
 
-# URL de Supabase para comunicación interna entre contenedores
+# Supabase URL for internal container communication
 SUPABASE_URL=http://host.docker.internal:54321
 
-# Claves de Supabase (generadas por make init)
+# Supabase keys (generated by make init)
 SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJFUzI1NiIs...
 DEFAULT_USER_PASSWORD=password123
 
-# Configuración JWT
+# JWT configuration
 SUPABASE_JWKS_URL=http://host.docker.internal:54321/auth/v1/.well-known/jwks.json
 
-# Conexión a la base de datos
+# Database connection
 DATABASE_URL=postgresql://postgres:postgres@db:5432/postgres
 
 # ==========================================
@@ -307,195 +307,195 @@ VITE_SUPABASE_URL=http://localhost/supabase
 VITE_SUPABASE_ANON_KEY=SUPABASE_ANON_KEY
 ```
 
-> **⚠️ NOTA DE SEGURIDAD**: La variable `DEFAULT_USER_PASSWORD` es una práctica **no recomendada** para producción. En un entorno real, debería implementarse un flujo de invitación o establecimiento de contraseña por el usuario.
+> **⚠️ SECURITY NOTE**: The `DEFAULT_USER_PASSWORD` variable is **not recommended** for production. In a real environment, an invitation flow or user-defined password setup should be implemented.
 
 ---
 
-## 🧠 Decisiones Técnicas
+## 🧠 Technical Decisions
 
-### 1. Supabase para Autenticación y Base de Datos
+### 1. Supabase for Authentication and Database
 
-Se eligió **Supabase** por:
-- **API de autenticación** sencilla y segura con JWT de firma asimétrica
-- **PostgreSQL gestionado** con Row Level Security (RLS) incluido
-- El JWT se valida en el middleware de Go, extrayendo `user_id` y `role` para la sesión
+**Supabase** was chosen for:
+- Simple and secure **authentication API** with asymmetric JWT signing
+- **Managed PostgreSQL** with Row Level Security (RLS) included
+- JWT is validated in Go middleware, extracting `user_id` and `role` for the session
 
-### 2. Nginx como Balanceador de Cargas
+### 2. Nginx as Load Balancer
 
-Originalmente se planificó una arquitectura de microservicios con múltiples réplicas, pero se optó por una arquitectura **Event-Driven**. Nginx quedó como reverse proxy y balanceador de cargas para futuras escalabilidades.
+Originally a microservices architecture with multiple replicas was planned, but an **Event-Driven** architecture was chosen instead. Nginx remained as reverse proxy and load balancer for future scalability.
 
-### 3. Arquitectura Orientada por Eventos (Event-Driven)
+### 3. Event-Driven Architecture
 
-Para evitar que la solicitud de un crédito y las comprobaciones con proveedores sea un proceso bloqueante:
+To avoid credit application requests and provider checks being a blocking process:
 
-1. La API recibe la solicitud y la guarda en la base de datos
-2. Crea un registro en `event_outbox` (dentro de la misma transacción - **Atomicidad UoW**)
-3. El **Worker** procesa eventos de forma asíncrona:
-   - Usa `SELECT FOR UPDATE SKIP LOCKED` para evitar procesamiento duplicado
-   - Patrón **Unit of Work** para garantizar transacciones atómicas
-4. Si el evento requiere consultar un proveedor, usa `workflow_providers` para determinar cuál llamar
-5. Si falla, puede reintentar con el siguiente proveedor según la prioridad configurada
+1. API receives the request and saves it to the database
+2. Creates a record in `event_outbox` (within the same transaction - **UoW Atomicity**)
+3. The **Worker** processes events asynchronously:
+   - Uses `SELECT FOR UPDATE SKIP LOCKED` to avoid duplicate processing
+   - **Unit of Work** pattern to guarantee atomic transactions
+4. If the event requires querying a provider, uses `workflow_providers` to determine which one to call
+5. If it fails, can retry with the next provider according to configured priority
 
-### 4. Tabla `workflow_providers`
+### 4. `workflow_providers` Table
 
-Mapea eventos a proveedores específicos por país:
-- `workflow_name`: Código del país (PT, CO, MX)
-- `event_step`: Tipo de evento (FETCH_BANK_DATA, VALIDATE_USER_IDENTITY)
-- `priority`: Si falla un proveedor, se intenta el siguiente
+Maps events to specific providers by country:
+- `workflow_name`: Country code (PT, CO, MX)
+- `event_step`: Event type (FETCH_BANK_DATA, VALIDATE_USER_IDENTITY)
+- `priority`: If a provider fails, the next one is tried
 
-### 5. PII Safe Queries (Cifrado de Documentos)
+### 5. PII Safe Queries (Document Encryption)
 
-Para cumplir con regulaciones de privacidad:
-- `identity_document` se almacena **cifrado** (Base64 por practicidad)
-- `identity_document_bidx` es un **blind index** que permite búsquedas exactas sin exponer el documento real
-
----
-
-## 🔒 Consideraciones de Seguridad
-
-### Implementado ✅
-- **Validación JWT**: El backend valida criptográficamente cada token
-- **RLS (Row Level Security)**: A nivel de base de datos
-- **Principio de Mínimo Privilegio**: Backend usa usuario con permisos restringidos
-
-### Pendiente ⚠️
-- **Throttling**: Limitar requests por IP/usuario a nivel de aplicación
-- **Conexiones optimizadas para RLS**: Mejorar pooling de conexiones para que RLS funcione correctamente en todos los escenarios
-- **Condiguración de kubernetes**, debido a que no tengo experiencia en el area
+To comply with privacy regulations:
+- `identity_document` is stored **encrypted** (Base64 for convenience)
+- `identity_document_bidx` is a **blind index** that allows exact searches without exposing the real document
 
 ---
 
-## 📈 Escalabilidad
+## 🔒 Security Considerations
 
-- **Workers horizontales**: Pueden replicarse infinitamente gracias a `FOR UPDATE SKIP LOCKED`
-- **Particionamiento**: La tabla `loan_applications` puede particionarse por país o fecha
-- **Goroutines**: El modelo CSP de Go permite miles de tareas ligeras
+### Implemented ✅
+- **JWT Validation**: Backend cryptographically validates each token
+- **RLS (Row Level Security)**: At database level
+- **Principle of Least Privilege**: Backend uses user with restricted permissions
+
+### Pending ⚠️
+- **Throttling**: Limit requests per IP/user at application level
+- **Optimized connections for RLS**: Improve connection pooling so RLS works correctly in all scenarios
+- **Kubernetes configuration**, due to lack of experience in the area
 
 ---
 
-## 🛠️ Comandos Útiles
+## 📈 Scalability
+
+- **Horizontal workers**: Can be replicated infinitely thanks to `FOR UPDATE SKIP LOCKED`
+- **Partitioning**: The `loan_applications` table can be partitioned by country or date
+- **Goroutines**: Go's CSP model allows thousands of lightweight tasks
+
+---
+
+## 🛠️ Useful Commands
 
 ```bash
-make init        # Inicializar Supabase y generar keys
-make up          # Levantar servicios
-make down        # Detener servicios
-make logs        # Ver logs en tiempo real
-make test        # Ejecutar tests de la API
-make create-user EMAIL=user@example.com PASS=password123  # Crear usuario admin
+make init        # Initialize Supabase and generate keys
+make up          # Start services
+make down        # Stop services
+make logs        # View logs in real-time
+make test        # Run API tests
+make create-user EMAIL=user@example.com PASS=password123  # Create admin user
 ```
 
 ---
 
-## 📁 Estructura del Proyecto
+## 📁 Project Structure
 
 ```
 globaltask-bank/
-├── backend/              # API y Worker (Go)
-│   ├── cmd/              # Puntos de entrada
-│   ├── internal/         # Código domain
+├── backend/              # API and Worker (Go)
+│   ├── cmd/              # Entry points
+│   ├── internal/         # Domain code
 │   └── ...
 ├── frontend/             # Dashboard (Vue 3)
 │   ├── src/
 │   └── ...
 ├── infra/
-│   ├── supabase/         # Migraciones y configuración
-│   │   └── migrations/   # Scripts SQL
-│   └── nginx/           # Configuración de Nginx
-├── k6/                   # Pruebas de carga (K6)
-│   └── scale-test.js    # Test de escala
-├── docker-compose.yml   # Orquestación de servicios
-├── Makefile            # Comandos de desarrollo
-└── README.md           # Este archivo
+│   ├── supabase/         # Migrations and configuration
+│   │   └── migrations/   # SQL scripts
+│   └── nginx/           # Nginx configuration
+├── k6/                   # Load testing (K6)
+│   └── scale-test.js    # Scale test
+├── docker-compose.yml   # Service orchestration
+├── Makefile            # Development commands
+└── README.md           # This file
 ```
 
 ---
 
-## 🧪 Pruebas de Carga con K6
+## 🧪 Load Testing with K6
 
-El proyecto incluye **K6** (Grafana k6) para ejecutar pruebas de carga y stress testing.
+The project includes **K6** (Grafana k6) for load testing and stress testing.
 
-### ¿Qué hace el test?
+### What does the test do?
 
-El archivo `k6/scale-test.js` simula un día completo de tráfico:
+The `k6/scale-test.js` file simulates a full day of traffic:
 
-- **Cálculos base:**
-  - 1M usuarios/día ≈ 11.5 RPS promedio
-  - Hora pico (3x) ≈ 35 RPS
-  - Pico absoluto (10x) ≈ 115 RPS
+- **Base calculations:**
+  - 1M users/day ≈ 11.5 RPS average
+  - Peak hour (3x) ≈ 35 RPS
+  - Absolute peak (10x) ≈ 115 RPS
 
-- **Comportamiento simulado:**
-  - 70% reads (listar préstamos)
-  - 25% writes (crear préstamos)
-  - 5% detail reads (ver detalle)
+- **Simulated behavior:**
+  - 70% reads (list loans)
+  - 25% writes (create loans)
+  - 5% detail reads (view detail)
 
-### Configuración de Stages
+### Stage Configuration
 
-| Etapa | Duración | Usuarios (VUs) |
+| Stage | Duration | Users (VUs) |
 |-------|----------|----------------|
-| Noche (mínimo) | 30s | 2% del pico |
-| Amanecer | 30s | 10% del pico |
-| Mañana | 1m | 30% del pico |
-| Mediodía | 1m | 60% del pico |
-| **Pico máximo** | 3m (configurable) | 100% del pico |
-| Atardecer | 1m | 40% del pico |
-| Noche | 1m | 10% del pico |
+| Night (minimum) | 30s | 2% of peak |
+| Dawn | 30s | 10% of peak |
+| Morning | 1m | 30% of peak |
+| Noon | 1m | 60% of peak |
+| **Maximum peak** | 3m (configurable) | 100% of peak |
+| Evening | 1m | 40% of peak |
+| Night | 1m | 10% of peak |
 
-### Umbrales de Rendimiento
+### Performance Thresholds
 
-| Métrica | Umbral | Descripción |
+| Metric | Threshold | Description |
 |---------|--------|-------------|
-| Login failures | < 5% | 95% de éxito |
-| Loan failures | < 10% | 90% de éxito |
-| Read failures | < 2% | 98% de éxito |
-| Login time p(95) | < 3s | Percentil 95 |
-| Loan time p(95) | < 5s | Percentil 95 |
-| Read time p(95) | < 1s | Percentil 95 |
+| Login failures | < 5% | 95% success |
+| Loan failures | < 10% | 90% success |
+| Read failures | < 2% | 98% success |
+| Login time p(95) | < 3s | 95th percentile |
+| Loan time p(95) | < 5s | 95th percentile |
+| Read time p(95) | < 1s | 95th percentile |
 
-### Ejecución
+### Execution
 
 ```bash
-# Ejecutar test con configuración por defecto (200 VUs, 1M usuarios/día)
+# Run test with default configuration (200 VUs, 1M users/day)
 docker compose run --rm k6 run /scripts/scale-test.js
-O
+OR
 make test-scale
 
-# Simular 1M usuarios/día con pico de 500 VUs
+# Simulate 1M users/day with 500 VUs peak
 docker compose run --rm k6 run /scripts/scale-test.js -e MAX_VUS=500
 
-# Simular escenario extremo (2M usuarios/día)
+# Simulate extreme scenario (2M users/day)
 docker compose run --rm k6 run /scripts/scale-test.js -e MAX_VUS=1000 -e DAILY_USERS=2000000
 
-# Escenario de pico sostenido por 10 minutos
+# Sustained peak scenario for 10 minutes
 docker compose run --rm k6 run /scripts/scale-test.js -e SUSTAIN_MINUTES=10
 ```
 
-### Variables de Entorno
+### Environment Variables
 
 ```bash
-ADMIN_EMAIL=admin@globaltask.com      # Email del usuario admin
-ADMIN_PASSWORD=password123            # Contraseña
+ADMIN_EMAIL=admin@globaltask.com      # Admin user email
+ADMIN_PASSWORD=password123            # Password
 SUPABASE_URL=http://host.docker.internal:54321
 API_URL=http://host.docker.internal
-MAX_VUS=200                           # Máx usuarios virtuales
-DAILY_USERS=1000000                   # Usuarios diarios objetivo
-SUSTAIN_MINUTES=3                     # Minutos en pico
-COUNTRY_ID=1                          # País para los tests
+MAX_VUS=200                           # Max virtual users
+DAILY_USERS=1000000                   # Target daily users
+SUSTAIN_MINUTES=3                     # Minutes at peak
+COUNTRY_ID=1                          # Country for tests
 ```
 
-> **Nota**: K6 está configurado en docker-compose.yml pero comentado por defecto. Para activarlo, descomenta la línea `command` en el servicio.
+> **Note**: K6 is configured in docker-compose.yml but commented by default. To activate it, uncomment the `command` line in the service.
 
 ---
 
-## 🧪 Stack Tecnológico
+## 🧪 Technology Stack
 
-| Capa | Tecnología |
+| Layer | Technology |
 |------|------------|
 | **Backend** | Go 1.22, Gin, PostgreSQL (pgx/v5), JWT, WebSockets |
 | **Frontend** | Vue 3, Vite 5, Pinia, Vue Router, Axios, Supabase JS, Tailwind CSS |
-| **Testing** | K6 (Grafana) - Pruebas de carga |
+| **Testing** | K6 (Grafana) - Load testing |
 | **Infra** | Docker, Docker Compose, Nginx, Supabase |
 
 ---
 
-**Desarrollado con ❤️**
+**Developed with ❤️**
 *Powered by AI + OpenSpec Methodology*

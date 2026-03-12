@@ -1,73 +1,73 @@
 # GlobalTask Bank - k6 Stress Tests
 
-Este directorio contiene scripts de pruebas de carga y estrés para la API de GlobalTask Bank usando [k6](https://k6.io/).
+This directory contains load and stress testing scripts for the GlobalTask Bank API using [k6](https://k6.io/).
 
-## Scripts Disponibles
+## Available Scripts
 
-### 1. `scale-test.js` ⭐ (Recomendado para 1M usuarios)
-Simula un **día completo** de tráfico basándose en usuarios diarios:
+### 1. `scale-test.js` ⭐ (Recommended for 1M users)
+Simulates a **full day** of traffic based on daily users:
 
-| Escenario | VUs | Simulación |
+| Scenario | VUs | Simulation |
 |-----------|-----|------------|
-| Noche | 2% pico | Usuarios mínimos |
-| Amanecer | 10% | Comienzan a despertar |
-| Mañana | 30% | Crecimiento |
-| Mediodía | 60% | Hora pico #1 |
-| **Pico máximo** | 100% | Máxima carga |
-| Atardecer | 40% | Decreciente |
-| Noche | 10% | Fin del día |
+| Night | 2% peak | Minimum users |
+| Dawn | 10% | Starting to wake up |
+| Morning | 30% | Growth |
+| Noon | 60% | Peak hour #1 |
+| **Maximum peak** | 100% | Maximum load |
+| Evening | 40% | Decreasing |
+| Night | 10% | End of day |
 
-**Proyección automática**: Al final dice cuántos usuarios/día puede manejar tu sistema.
+**Automatic projection**: At the end it tells you how many users/day your system can handle.
 
-**Uso:**
+**Usage:**
 ```bash
-# 1M usuarios/día (default), 200 VUs
+# 1M users/day (default), 200 VUs
 docker compose run --rm k6 run k6/scale-test.js
 
-# Escalar a más VUs
+# Scale to more VUs
 docker compose run --rm k6 run k6/scale-test.js -e MAX_VUS=500
 
-# Especificar usuarios diarios
+# Specify daily users
 docker compose run --rm k6 run k6/scale-test.js -e DAILY_USERS=2000000 -e MAX_VUS=400
 ```
 
-## Variables de Entorno
+## Environment Variables
 
-| Variable | Descripción | Default |
+| Variable | Description | Default |
 |----------|-------------|---------|
-| `ADMIN_EMAIL` | Email del administrador | `admin@globaltask.com` |
-| `ADMIN_PASSWORD` | Password del administrador | `password123` |
-| `SUPABASE_URL` | URL de Supabase | `http://localhost:54321` |
-| `API_URL` | URL de la API | `http://localhost` |
-| `COUNTRY_ID` | ID del país para préstamos | `1` |
-| `DAILY_USERS` | Usuarios diarios (scale-test) | `1000000` |
-| `MAX_VUS` | Máximo VUs (scale-test) | `200` |
-| `SUSTAIN_MINUTES` | Minutos en pico | `3` |
+| `ADMIN_EMAIL` | Admin email | `admin@globaltask.com` |
+| `ADMIN_PASSWORD` | Admin password | `password123` |
+| `SUPABASE_URL` | Supabase URL | `http://localhost:54321` |
+| `API_URL` | API URL | `http://localhost` |
+| `COUNTRY_ID` | Country ID for loans | `1` |
+| `DAILY_USERS` | Daily users (scale-test) | `1000000` |
+| `MAX_VUS` | Maximum VUs (scale-test) | `200` |
+| `SUSTAIN_MINUTES` | Minutes at peak | `3` |
 
-## Configuración de Escenarios
+## Scenario Configuration
 
-Los scripts incluyen escenarios configurables en `export const options`:
+Scripts include configurable scenarios in `export const options`:
 
 ### Ramp Up (stress-test.js)
 ```
-10s → 5 usuarios
-20s → 10 usuarios
-30s → 20 usuarios
-30s → mantener 20 usuarios
-10s → 0 usuarios
+10s → 5 users
+20s → 10 users
+30s → 20 users
+30s → maintain 20 users
+10s → 0 users
 ```
 
-## Métricas Monitoreadas
+## Monitored Metrics
 
-- **login_failures**: Tasa de fallos en login
-- **loan_create_failures**: Tasa de fallos en creación de préstamos
-- **login_time**: Tiempo de respuesta del login (p95 < 2s)
-- **loan_create_time**: Tiempo de creación (p95 < 5s)
-- **http_req_failed**: Tasa de errores HTTP global
+- **login_failures**: Login failure rate
+- **loan_create_failures**: Loan creation failure rate
+- **login_time**: Login response time (p95 < 2s)
+- **loan_create_time**: Creation time (p95 < 5s)
+- **http_req_failed**: Global HTTP error rate
 
-## Resultados Esperados
+## Expected Results
 
-Con la configuración por defecto (20 VUs):
-- ~120-180 préstamos creados por minuto
-- Tiempo p95 de creación < 5s
-- Tasa de éxito > 90%
+With default configuration (20 VUs):
+- ~120-180 loans created per minute
+- p95 creation time < 5s
+- Success rate > 90%
